@@ -16,27 +16,10 @@ def verify_token(
     expected_audience: str,
     required_claims: set,
 ) -> dict[str, Any]:
-    """Verify JWT token signature using OIDC discovery.
-
-    This performs full cryptographic verification:
-    1. Fetches OIDC configuration from issuer
-    2. Gets JWKS URI from configuration
-    3. Fetches public keys using PyJWKClient
-    4. Verifies signature using RS256
-    5. Validates token schema
-
-    Args:
-        token: JWT token string
-        issuer: Expected issuer URL
-        expected_audience: Expected audience value
-
-    Returns:
-        Fully verified token claims
-
-    Raises:
-        TokenVerificationError: If signature verification fails
+    """Verify JWT token signature using OIDC discovery and return claims.
+    Raises TokenVerificationError, if verification fails
     """
-    # Fetch OIDC configuration
+    # 1. Request OIDC configuration from issuer
     config_url = f"{issuer}/.well-known/openid-configuration"
 
     try:
@@ -49,19 +32,17 @@ def verify_token(
             f"Failed to fetch OIDC configuration from {config_url}: {e}"
         ) from e
 
-    # Extract JWKS URI
+    # 2. Extract JWKS URI from issuer configuration
     jwks_uri = oidc_config.get("jwks_uri")
     if not jwks_uri:
         raise TokenVerificationError("OIDC configuration missing 'jwks_uri'")
 
     try:
-        # Create PyJWKClient to fetch signing keys
+        # 3. Requests public keys from issuer
         jwks_client = jwt.PyJWKClient(jwks_uri)
-
-        # Get signing key from token
         signing_key = jwks_client.get_signing_key_from_jwt(token)
 
-        # Verify token with full validation
+        # 4. Verify token signature and content
         claims = jwt.decode(
             token,
             signing_key.key,

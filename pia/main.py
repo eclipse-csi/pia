@@ -12,7 +12,7 @@ from . import __version__, dependencytrack, oidc
 from .models import (
     AllowList,
     DependencyTrackUploadPayload,
-    PIAUploadPayload,
+    PiaUploadPayload,
 )
 
 # Configure logging
@@ -31,19 +31,35 @@ class Settings(BaseSettings):
     """
 
     dependency_track_api_key: str
+    """
+    DependencyTrack API Key
+    https://docs.dependencytrack.org/integrations/rest-api/
+    """
     allowlist_path: str
-    expected_audience: str = "pia.eclipse.org"
-    dependency_track_url: HttpUrl = "https://sbom.eclipse.org/api/v1/bom"
+    """
+    Path to allowlist.yaml
+    """
 
-    model_config = SettingsConfigDict(env_prefix="PIA_")
+    expected_audience: str = "pia.eclipse.org"
+    """
+    Expected value for "aud" claim in all OIDC tokens
+    """
+
+    dependency_track_url: HttpUrl = "https://sbom.eclipse.org/api/v1/bom"
+    """
+    DependencyTrack SBOM upload URL
+    """
+
+    model_config = SettingsConfigDict(env_prefix="PIA_", use_attribute_docstrings=True)
 
 
 # Load settings
 settings = Settings()
+logger.info("PIA application settings loaded successfully")
 
 
-# Load allowlist from file only once on app startup
-# See https://fastapi.tiangolo.com/advanced/events/
+# Lifespan wrapper to load allowlist from file only once on app startup
+# see https://fastapi.tiangolo.com/advanced/events/
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     app.state.allowlist = AllowList.from_yaml_file(settings.allowlist_path)
@@ -51,6 +67,7 @@ async def lifespan(app: FastAPI):
     yield
 
 
+# Create app
 app = FastAPI(
     title="Project Identity Authority (PIA)",
     description="OIDC-based authentication broker for Eclipse Foundation projects",
@@ -60,8 +77,8 @@ app = FastAPI(
 logger.info("PIA application initialized successfully")
 
 
-def _unauthorized(msg: str):
-    """Return 401"""
+def _401(msg: str):
+    """Helper to return 401"""
     raise HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail=msg,
@@ -69,10 +86,10 @@ def _unauthorized(msg: str):
 
 
 @app.post("/upload/sbom", status_code=status.HTTP_200_OK)
-async def upload_sbom(payload: PIAUploadPayload, request: Request):
+async def upload_sbom(payload: PiaUploadPayload, request: Request):
     """Handle SBOM upload with OIDC authentication.
 
-    Implements the authentication flow from DESIGN.md section 3.1.1.
+    Implements authentication flow from DESIGN.md section 3.1.1.
     """
     allowlist: AllowList = request.app.state.allowlist
     project_id: str = payload.project_id
@@ -81,7 +98,7 @@ async def upload_sbom(payload: PIAUploadPayload, request: Request):
     project = allowlist.find_project(project_id)
     if not project:
         logger.warning(f"Unknown project: {project_id}")
-        _unauthorized("Project not allowed")
+        _401("Project not allowed")
 
     # Extract issuer from unverified token
     try:
@@ -92,16 +109,16 @@ async def upload_sbom(payload: PIAUploadPayload, request: Request):
         unverified_issuer: str = unverified_claims["iss"]
     except jwt.PyJWTError as e:
         logger.warning(f"Token decode failed: {e}")
-        _unauthorized("Invalid token")
+        _401("Invalid token")
 
     # Since we already have the issuer, we might as well check, if it is
     # allowed, to fail early, before fetching keys, etc. Note that we can only
     # trust an allowed issuer after having verified the token below.
-    if not project.is_issuer_allowed(unverified_issuer):
+    if not project.match_issuer(unverified_issuer):
         logger.warning(
             f"Issuer {unverified_issuer} not allowed for project {project_id}"
         )
-        _unauthorized("Issuer not allowed")
+        _401("Issuer not allowed")
 
     # Full token verification
     try:
@@ -113,12 +130,12 @@ async def upload_sbom(payload: PIAUploadPayload, request: Request):
         )
     except oidc.TokenVerificationError as e:
         logger.warning(f"Token verification failed: {e}")
-        _unauthorized("Token verification failed")
+        _401("Token verification failed")
 
     # Project authentication
     if not project.match_claims(verified_claims):
         logger.warning(f"Token claims mismatch for project {project_id}")
-        _unauthorized("Project token claim mismatch")
+        _401("Project token claim mismatch")
 
     logger.info(
         f"Successfully authenticated project {project_id} "
@@ -146,11 +163,12 @@ async def upload_sbom(payload: PIAUploadPayload, request: Request):
         )
 
         # Relay DependencyTrack response
-        return Response(
+        response = Response(
             content=dt_response.content,
             status_code=dt_response.status_code,
             media_type="application/json",
         )
+        return response
 
     except dependencytrack.DependencyTrackError as e:
         logger.error(f"DependencyTrack upload failed: {e}")

@@ -14,18 +14,8 @@ def upload_sbom(
     api_key: str,
     payload: DependencyTrackUploadPayload,
 ) -> requests.Response:
-    """Upload SBOM to DependencyTrack.
-
-    Args:
-        url: API endpoint
-        api_key: API key
-        payload: SBOM payload to upload
-
-    Returns:
-        Response from DependencyTrack API
-
-    Raises:
-        DependencyTrackError: If upload fails
+    """Upload SBOM to DependencyTrack and return full response.
+    Raise DependencyTrackError, if upload fails.
     """
     headers = {
         "Content-Type": "application/json",
@@ -38,8 +28,6 @@ def upload_sbom(
             json=payload.to_dict(),
             headers=headers,
         )
-
-        # Return response for caller to handle status code
         return response
 
     except requests.RequestException as e:

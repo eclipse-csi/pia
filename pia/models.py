@@ -1,35 +1,42 @@
 """Data models with validation and authentication logic."""
 
-from typing import Any
+from typing import Annotated, Any
 
 import yaml
-from pydantic import BaseModel, Field, HttpUrl, field_validator
+from pydantic import BaseModel, ConfigDict, Field, HttpUrl, UrlConstraints
+
+# `preserve_empty_path=True` tells pydantic to not add any trailing slashes,
+# to avoid surprising results in `Project.match_issuer`.
+HttpsUrl = Annotated[
+    HttpUrl, UrlConstraints(allowed_schemes=["https"], preserve_empty_path=True)
+]
 
 
-class Project(BaseModel):
-    issuer: HttpUrl
+class BaseConfigModel(BaseModel):
+    model_config = ConfigDict(use_attribute_docstrings=True)
+
+
+class Project(BaseConfigModel):
+    """Eclipse Foundation Project model."""
+
+    issuer: HttpsUrl
+    """
+    Allowed OIDC issuer for this project
+    """
+
     dt_parent_uuid: str
-    required_claims: dict[str, str] | None = Field(default_factory=dict)
+    """
+    DependencyTrack project UUID for SBOMs of this project
+    """
 
-    @field_validator("issuer")
-    @classmethod
-    def validate_https(cls, v: HttpUrl) -> HttpUrl:
-        """Validate that issuer URL uses HTTPS."""
-        if v.scheme != "https":
-            raise ValueError("issuer must be HTTPS URL")
-        return v
+    required_claims: dict[str, str] = Field(default_factory=dict)
+    """
+    Map of OIDC claim names and values required in OIDC tokens for this project
+    """
 
-    def is_issuer_allowed(self, issuer: str) -> bool:
-        """Check if issuer is allowed for project."""
-        # Normalize URLs for comparison using HttpUrl
-        # This ensures consistent trailing slash handling
-        try:
-            normalized_issuer = str(HttpUrl(issuer))
-            return str(self.issuer) == normalized_issuer
-
-        except Exception:
-            # If issuer is invalid, comparison fails
-            return False
+    def match_issuer(self, issuer: str) -> bool:
+        """Verify that issuer matches allowed project issuer."""
+        return issuer == str(self.issuer)
 
     def match_claims(self, token_claims: dict[str, Any]) -> bool:
         """Verify that token claims match required claims for project."""
@@ -40,8 +47,14 @@ class Project(BaseModel):
         return True
 
 
-class AllowList(BaseModel):
+class AllowList(BaseConfigModel):
+    "AllowList for Eclipse Foundation projects."
+
     projects: dict[str, Project]
+    """
+    Map of Eclipse Foundation project IDs to Projects
+    https://www.eclipse.org/projects/handbook/#resources-identifiers
+    """
 
     def find_project(self, project_id: str) -> Project | None:
         """Find project in AllowList by project ID."""
@@ -49,21 +62,42 @@ class AllowList(BaseModel):
 
     @classmethod
     def from_yaml_file(cls, path: str) -> "AllowList":
-        """Load YAML project AllowList file."""
+        """Load AllowList form YAML file."""
         with open(path) as f:
             config_dict = yaml.safe_load(f)
 
         return cls.model_validate(config_dict)
 
 
-class PIAUploadPayload(BaseModel):
+class PiaUploadPayload(BaseConfigModel):
     """Payload for PIA SBOM upload."""
 
     project_id: str
+    """
+    Eclipse Foundation project ID
+    https://www.eclipse.org/projects/handbook/#resources-identifiers
+    """
+
     product_name: str
+    """
+    Name of product for which the SBOM is produced. This field is required by
+    DependencyTrack to aggregate SBOMs by product within a project.
+    """
+
     product_version: str
+    """
+    Version of product for which the SBOM was produced
+    """
+
     bom: str
+    """
+    Base64-encoded CycloneDX JSON SBOM
+    """
+
     token: str
+    """
+    OIDC token used to authenticate PIA SBOM upload
+    """
 
 
 class DependencyTrackUploadPayload(BaseModel):
