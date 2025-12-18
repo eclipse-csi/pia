@@ -4,21 +4,21 @@ import pytest
 from pydantic import ValidationError
 
 from pia.models import (
-    AllowList,
     DependencyTrackUploadPayload,
     PiaUploadPayload,
     Project,
+    Projects,
 )
 
 
 class TestProject:
     @pytest.fixture
-    def github(self, test_allowlist):
-        return Project(**test_allowlist["projects"]["github-project"])
+    def github(self, test_projects):
+        return Project(**test_projects["projects"]["github-project"])
 
     @pytest.fixture
-    def jenkins(self, test_allowlist):
-        return Project(**test_allowlist["projects"]["jenkins-project"])
+    def jenkins(self, test_projects):
+        return Project(**test_projects["projects"]["jenkins-project"])
 
     def test_match_issuer(self, github):
         assert github.match_issuer("https://token.actions.githubusercontent.com")
@@ -34,18 +34,18 @@ class TestProject:
         assert jenkins.match_claims({"c": "d"})
 
 
-class TestAllowList:
-    def test_load_yaml_file(self, test_allowlist_file, test_allowlist):
-        allowlist = AllowList.from_yaml_file(test_allowlist_file)
-        assert allowlist == AllowList(**test_allowlist)
+class TestProjects:
+    def test_load_yaml_file(self, test_projects_file, test_projects):
+        projects = Projects.from_yaml_file(test_projects_file)
+        assert projects == Projects(**test_projects)
 
-    def test_find_project(self, test_allowlist):
+    def test_find_project(self, test_projects):
         """Test finding projects by ID."""
-        allowlist = AllowList(**test_allowlist)
+        projects = Projects(**test_projects)
 
-        assert allowlist.find_project("github-project") is not None
-        assert allowlist.find_project("jenkins-project") is not None
-        assert allowlist.find_project("nonexistent") is None
+        assert projects.find_project("github-project") is not None
+        assert projects.find_project("jenkins-project") is not None
+        assert projects.find_project("nonexistent") is None
 
 
 class TestUploadSBOMPayload:

@@ -10,9 +10,9 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from . import __version__, dependencytrack, oidc
 from .models import (
-    AllowList,
     DependencyTrackUploadPayload,
     PiaUploadPayload,
+    Projects,
 )
 
 # Configure logging
@@ -35,9 +35,9 @@ class Settings(BaseSettings):
     DependencyTrack API Key
     https://docs.dependencytrack.org/integrations/rest-api/
     """
-    allowlist_path: str
+    projects_path: str
     """
-    Path to allowlist.yaml
+    Path to projects.yaml
     """
 
     expected_audience: str = "pia.eclipse.org"
@@ -58,12 +58,12 @@ settings = Settings()
 logger.info("PIA application settings loaded successfully")
 
 
-# Lifespan wrapper to load allowlist from file only once on app startup
+# Lifespan wrapper to load projects from file only once on app startup
 # see https://fastapi.tiangolo.com/advanced/events/
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    app.state.allowlist = AllowList.from_yaml_file(settings.allowlist_path)
-    logger.info(f"Loaded allowlist from {settings.allowlist_path}")
+    app.state.projects = Projects.from_yaml_file(settings.projects_path)
+    logger.info(f"Loaded projects from {settings.projects_path}")
     yield
 
 
@@ -91,11 +91,11 @@ async def upload_sbom(payload: PiaUploadPayload, request: Request):
 
     Implements authentication flow from DESIGN.md section 3.1.1.
     """
-    allowlist: AllowList = request.app.state.allowlist
+    projects: Projects = request.app.state.projects
     project_id: str = payload.project_id
 
     # Verify project is allowed
-    project = allowlist.find_project(project_id)
+    project = projects.find_project(project_id)
     if not project:
         logger.warning(f"Unknown project: {project_id}")
         _401("Project not allowed")

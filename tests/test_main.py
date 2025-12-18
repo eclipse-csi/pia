@@ -11,20 +11,20 @@ from pia.oidc import TokenVerificationError
 
 
 @pytest.fixture
-def setup_env(test_allowlist_file):
-    """Provide temporary allowlist file and assign env variables."""
+def setup_env(test_projects_file):
+    """Provide temporary projects file and assign env variables."""
     import os
 
     os.environ["PIA_DEPENDENCY_TRACK_API_KEY"] = "test-secret"
-    os.environ["PIA_ALLOWLIST_PATH"] = str(test_allowlist_file)
+    os.environ["PIA_PROJECTS_PATH"] = str(test_projects_file)
     yield
     del os.environ["PIA_DEPENDENCY_TRACK_API_KEY"]
-    del os.environ["PIA_ALLOWLIST_PATH"]
+    del os.environ["PIA_PROJECTS_PATH"]
 
 
 @pytest.fixture
 def client(setup_env):
-    """Create FastAPI test client with allowlist loaded."""
+    """Create FastAPI test client with projects loaded."""
     from pia.main import app
 
     with TestClient(app) as test_client:

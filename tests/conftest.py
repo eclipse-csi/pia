@@ -5,7 +5,7 @@ import yaml
 
 
 @pytest.fixture
-def test_allowlist():
+def test_projects():
     return {
         "projects": {
             "github-project": {
@@ -22,8 +22,8 @@ def test_allowlist():
 
 
 @pytest.fixture
-def test_allowlist_file(tmp_path, test_allowlist):
-    allowlist_path = tmp_path / "allowlist.yaml"
-    with open(allowlist_path, "w") as f:
-        yaml.dump(test_allowlist, f)
-    return allowlist_path
+def test_projects_file(tmp_path, test_projects):
+    projects_path = tmp_path / "projects.yaml"
+    with open(projects_path, "w") as f:
+        yaml.dump(test_projects, f)
+    return projects_path

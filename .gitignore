@@ -40,5 +40,5 @@ htmlcov/
 *~
 
 # PIA specific
-allowlist.yaml  # Don't commit actual allowlist (use allowlist.yaml.example)
+projects.yaml  # Don't commit actual projects (use projects.yaml.example)
 *.log

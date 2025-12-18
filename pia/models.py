@@ -47,8 +47,8 @@ class Project(BaseConfigModel):
         return True
 
 
-class AllowList(BaseConfigModel):
-    "AllowList for Eclipse Foundation projects."
+class Projects(BaseConfigModel):
+    """Projects for Eclipse Foundation projects."""
 
     projects: dict[str, Project]
     """
@@ -57,12 +57,12 @@ class AllowList(BaseConfigModel):
     """
 
     def find_project(self, project_id: str) -> Project | None:
-        """Find project in AllowList by project ID."""
+        """Find project in Projects by project ID."""
         return self.projects.get(project_id, None)
 
     @classmethod
-    def from_yaml_file(cls, path: str) -> "AllowList":
-        """Load AllowList form YAML file."""
+    def from_yaml_file(cls, path: str) -> "Projects":
+        """Load Projects form YAML file."""
         with open(path) as f:
             config_dict = yaml.safe_load(f)
 

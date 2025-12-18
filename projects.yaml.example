@@ -1,7 +1,7 @@
-# PIA AllowList Example
+# PIA Projects File Example
 #
-# This file shows an example AllowList for both GitHub Actions and Jenkins projects.
-# Copy this to allowlist.yaml and customize for your projects.
+# This file shows an example projects file for both GitHub Actions and Jenkins projects.
+# Copy this to projects.yaml and customize for your projects.
 
 projects:
   # Example GitHub Actions project
