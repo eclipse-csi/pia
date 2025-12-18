@@ -3,17 +3,16 @@
 # This file shows an example projects file for both GitHub Actions and Jenkins projects.
 # Copy this to projects.yaml and customize for your projects.
 
-projects:
-  # Example GitHub Actions project
-  my-github-project:
-    issuer: "https://token.actions.githubusercontent.com"
-    dt_parent_uuid: "12345678-1234-1234-1234-123456789abc"
-    required_claims:
-      repository: "eclipse-foo/my-github-project"
+# Example GitHub Actions project
+my-github-project:
+  issuer: "https://token.actions.githubusercontent.com"
+  dt_parent_uuid: "12345678-1234-1234-1234-123456789abc"
+  required_claims:
+    repository: "eclipse-foo/my-github-project"
 
-  # Example Jenkins project
-  my-jenkins-project:
-    issuer: "https://ci.eclipse.org/my-jenkins-project/oidc"
-    dt_parent_uuid: "87654321-4321-4321-4321-cba987654321"
-    # Note: Jenkins projects typically don't need required_claims
-    # because the issuer URL itself identifies the project
+# Example Jenkins project
+my-jenkins-project:
+  issuer: "https://ci.eclipse.org/my-jenkins-project/oidc"
+  dt_parent_uuid: "87654321-4321-4321-4321-cba987654321"
+  # Note: Jenkins projects typically don't need required_claims
+  # because the issuer URL itself identifies the project

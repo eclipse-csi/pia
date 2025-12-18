@@ -14,11 +14,11 @@ from pia.models import (
 class TestProject:
     @pytest.fixture
     def github(self, test_projects):
-        return Project(**test_projects["projects"]["github-project"])
+        return Project(**test_projects["github-project"])
 
     @pytest.fixture
     def jenkins(self, test_projects):
-        return Project(**test_projects["projects"]["jenkins-project"])
+        return Project(**test_projects["jenkins-project"])
 
     def test_match_issuer(self, github):
         assert github.match_issuer("https://token.actions.githubusercontent.com")

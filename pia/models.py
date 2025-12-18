@@ -3,7 +3,7 @@
 from typing import Annotated, Any
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, HttpUrl, UrlConstraints
+from pydantic import BaseModel, ConfigDict, Field, HttpUrl, RootModel, UrlConstraints
 
 # `preserve_empty_path=True` tells pydantic to not add any trailing slashes,
 # to avoid surprising results in `Project.match_issuer`.
@@ -12,11 +12,7 @@ HttpsUrl = Annotated[
 ]
 
 
-class BaseConfigModel(BaseModel):
-    model_config = ConfigDict(use_attribute_docstrings=True)
-
-
-class Project(BaseConfigModel):
+class Project(BaseModel):
     """Eclipse Foundation Project model."""
 
     issuer: HttpsUrl
@@ -34,6 +30,8 @@ class Project(BaseConfigModel):
     Map of OIDC claim names and values required in OIDC tokens for this project
     """
 
+    model_config = ConfigDict(use_attribute_docstrings=True)
+
     def match_issuer(self, issuer: str) -> bool:
         """Verify that issuer matches allowed project issuer."""
         return issuer == str(self.issuer)
@@ -47,29 +45,28 @@ class Project(BaseConfigModel):
         return True
 
 
-class Projects(BaseConfigModel):
-    """Projects for Eclipse Foundation projects."""
+class Projects(RootModel):
+    """Map of Eclipse Foundation project IDs to Projects
 
-    projects: dict[str, Project]
-    """
-    Map of Eclipse Foundation project IDs to Projects
     https://www.eclipse.org/projects/handbook/#resources-identifiers
     """
 
+    root: dict[str, Project]
+
     def find_project(self, project_id: str) -> Project | None:
         """Find project in Projects by project ID."""
-        return self.projects.get(project_id, None)
+        return self.root.get(project_id, None)
 
     @classmethod
     def from_yaml_file(cls, path: str) -> "Projects":
-        """Load Projects form YAML file."""
+        """Load Projects from YAML file."""
         with open(path) as f:
             config_dict = yaml.safe_load(f)
 
         return cls.model_validate(config_dict)
 
 
-class PiaUploadPayload(BaseConfigModel):
+class PiaUploadPayload(BaseModel):
     """Payload for PIA SBOM upload."""
 
     project_id: str
@@ -98,6 +95,8 @@ class PiaUploadPayload(BaseConfigModel):
     """
     OIDC token used to authenticate PIA SBOM upload
     """
+
+    model_config = ConfigDict(use_attribute_docstrings=True)
 
 
 class DependencyTrackUploadPayload(BaseModel):

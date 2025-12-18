@@ -7,17 +7,15 @@ import yaml
 @pytest.fixture
 def test_projects():
     return {
-        "projects": {
-            "github-project": {
-                "issuer": "https://token.actions.githubusercontent.com",
-                "dt_parent_uuid": "uuid-1",
-                "required_claims": {"repository": "eclipse-test/repo"},
-            },
-            "jenkins-project": {
-                "issuer": "https://ci.eclipse.org/test/oidc",
-                "dt_parent_uuid": "uuid-2",
-            },
-        }
+        "github-project": {
+            "issuer": "https://token.actions.githubusercontent.com",
+            "dt_parent_uuid": "uuid-1",
+            "required_claims": {"repository": "eclipse-test/repo"},
+        },
+        "jenkins-project": {
+            "issuer": "https://ci.eclipse.org/test/oidc",
+            "dt_parent_uuid": "uuid-2",
+        },
     }
 
 
