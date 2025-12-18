@@ -27,7 +27,7 @@ Run the full test suite with pytest:
 uv run pytest                             # all tests
 uv run pytest -v                          # verbose output
 uv run pytest tests/test_main.py          # specific test
-uv run pytest --cov=pia --cov-report=html # with coverage
+uv run pytest --cov=pia                   # with coverage
 ```
 
 ### Code Quality
