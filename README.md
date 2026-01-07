@@ -1,2 +1,4 @@
-# pia
-Project Identity Authority (PIA) authenticates Eclipse Foundation projects using OpenID Connect (OIDC).
+# Project Identity Authority (PIA)
+Authenticates Eclipse Foundation projects using OpenID Connect (OIDC).
+
+See [Design Document](docs/DESIGN.md) for details.
