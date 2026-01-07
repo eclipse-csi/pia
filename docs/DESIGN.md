@@ -43,7 +43,7 @@ sequenceDiagram
     participant Publisher as Publisher<br/>(GHA, Jenkins Pipeline)
     participant IdP as Identity Provider<br/>(GitHub, Jenkins Controller)
     participant PIA as PIA<br/>
-    participant dp as DependencyTrack<br/>(DependencyTrack)
+    participant dp as DependencyTrack<br/>
 
     Publisher->>IdP: 1. Request ID token
     IdP->>Publisher: 2. Return ID token
@@ -53,7 +53,7 @@ sequenceDiagram
     PIA->>IdP: 6. Request JWKs
     IdP->>PIA: 7. Return JWKs
     PIA->>PIA: 8. Authenticate
-    Note over PIA: - Verify token<br/>- Match claims with allowlist
+    Note over PIA: - Verify token<br/>- Match claims with projects settings
     PIA->>dp: 9. Post SBOM
     dp-->>PIA: Success
     PIA-->>Publisher: Success
@@ -74,7 +74,7 @@ sequenceDiagram
 #### PIA
 - Provides REST API for SBOM upload
 - Verifies identity tokens using OIDC discovery protocol
-- Authenticates SBOM based on OIDC claims and internal allowlist
+- Authenticates SBOM based on OIDC claims and internal projects settings
 - Publishes SBOM to DependencyTrack on behalf of authenticated projects
 
 #### DependencyTrack
@@ -87,8 +87,8 @@ sequenceDiagram
      Identity Provider (managed by GitHub)
    - Each Jenkins Publisher has its own Identity Provider running on the same
      Jenkins instance (managed by Eclipse Foundation)
-2. **PIA** trusts **Identity Provider** because PIA has an allowlist for
-   Identity Provider URLs (managed by Eclipse Foundation)
+2. **PIA** trusts **Identity Provider** because PIA has projects settings for
+   Identity Provider (issuer) URLs (managed by Eclipse Foundation)
 3. **DependencyTrack** trusts **PIA** because PIA has an auth token for
    the DependencyTrack API (managed by Eclipse Foundation)
 
@@ -105,6 +105,7 @@ sequenceDiagram
 
    - `iss`: Issuer URL (identifies Identity Provider)
    - `exp`: Expiration timestamp
+   - `iat`: Issued At timestamp
    - `aud`: Audience (must match PIA's expected audience)
    - Platform-specific:
      - GitHub: `repository` identifies project via repository owner and name
@@ -140,31 +141,25 @@ sequenceDiagram
 
 #### 3.1.1 Token Verification and Authentication Flow
 
-1. Basic POST data validation
+1. Basic POST Data Validation
    1. Validate basic POST data schema
    2. Verify `project_id` is known and allowed
 2. Issuer Validation
    1. Decode token without any verification
    2. Extract issuer
    3. Verify issuer is known and allowed for `project_id`
-3. Basic Token Validation
-   1. Verify token is not expired
-   2. Verify required claims are present
-   3. Verify audience matches expected value
-4. Token Signature Verification
+3. Token Key Discovery
    1. Fetch OIDC configuration from `{issuer}/.well-known/openid-configuration`
    2. Extract `jwks_uri` from configuration
    3. Fetch public keys from `jwks_uri`
    4. Match key using `kid` claim from token header
-   5. Verify signature using RSA256
+4. Token Validation and Signature Verification
+   1. Verify required claims are present
+   2. Verify token issued at time and expiry
+   3. Verify audience matches expected value
+   4. Verify signature using RSA256
 5. Project Authorization
    1. Verify that platform specific claims are correct for `project_id`
-
-#### 3.1.2 Token Verification and Authentication Sequence Rationale
-
-We parse and verify untrusted data incrementally, to build up trust as we parse
-more data and to fail early before performing expensive network and crypto
-operations.
 
 ## 4. API Design
 
@@ -194,68 +189,67 @@ Accepts sbom uploads with OIDC authentication.
   - Token verification error
   - Issuer not allowed
   - Project token claim mismatch
+- `502`: DependencyTrack post request failed
 - `*`: Relay DependencyTrack status code
 
 
-### 4.2 Configuration
+### 4.2 Settings
 
-PIA requires configuration for:
+PIA requires settings for:
 
-1. **Expected Audience**: `pia.eclipse.org`
+1. **Application**: Loaded from environment variables with `PIA_` prefix:
+    - `PIA_DEPENDENCY_TRACK_API_KEY`: DependencyTrack API key (required)
+    - `PIA_PROJECTS_PATH`: Path to projects.yaml file (required)
+    - `PIA_DEPENDENCY_TRACK_URL`: DependencyTrack SBOM upload URL
+      (default: `https://sbom.eclipse.org/api/v1/bom`)
+    - `PIA_EXPECTED_AUDIENCE`: Expected audience for OIDC tokens
+      (default: `pia.eclipse.org`)
 
-2. **Allowlist of Issuers and Projects**: YAML-based configuration that maps
-    project ID to allowed issuer required claims and a DependencyTrack project
-    UUID. Schema:
+2. **Projects**: YAML file (e.g. `projects.yaml`) that maps project ID to
+    allowed issuer, required claims, and DependencyTrack project UUID. Schema:
     ```yaml
-    projects:
-      <project_id>:
-        issuer: <issuer_url>
-        dt_parent_uuid: <uuid>  # DependencyTrack project UUID
-        required_claims:        # Omit for Jenkins (issuer is enough)
-          <claim_name>: <expected_value>
+    <project_id>:
+      issuer: <issuer_url>
+      dt_parent_uuid: <uuid>  # DependencyTrack project UUID
+      required_claims:        # Omit for Jenkins (issuer is enough)
+        <claim_name>: <expected_value>
     ```
     NOTE: Initial implementation uses static YAML; designed for future database
     migration.
 
-3. **DependencyTrack Credentials**:
-    ```yaml
-    dt:
-      url: <upload_url>
-      secret: DEPENDENCY_TRACK_API_KEY   # Environment variable name
-    ```
+
 ## 5. Implementation Details
 
 ### 5.1 Technology Stack
 
-- **Web Framework**: Flask (simple, synchronous)
+- **Web Framework**: FastAPI (modern, has built-in model validation and API documentation)
 - **HTTP Client**: `requests` for OIDC discovery and DependencyTrack API calls
 - **JWT Library**: `PyJWT` with `cryptography` support
   - Handles token parsing, validation, and signature verification
   - Includes `PyJWKClient` for JWKS key fetching
-- **Testing**: `ruff`, `pytest`
+- **Testing**: `pytest`
+- **Linting**: `ruff`
 - **Python Project Management**: `uv`
 
 ### 5.2 Project Structure
 
 ```
 pia/
-   pia/
-        __init__.py
-        api.py
-        oidc.py
-        config.py
-        dependencytrack.py
-        models.py
-    tests/
-        conftest.py
-        test_api.py
-        test_oidc.py
-        test_config.py
-        test_dependencytrack.py
-        test_models.py
     docs/
         DESIGN.md            # Design document (this)
-    config.yaml              # Allowlist, DependencyTrack config
+    pia/
+        __init__.py
+        dependencytrack.py
+        main.py
+        models.py
+        oidc.py
+    tests/
+        conftest.py
+        test_dependencytrack.py
+        test_main.py
+        test_models.py
+        test_oidc.py
+    projects.yaml.example    # Example projects settings
     pyproject.toml
     README.md
     .gitignore
@@ -263,39 +257,35 @@ pia/
 
 ### 5.3 Core Modules
 
-- `__init__.py`: Provides the Flask App Entrypoint
-- `api.py`: Provides PIA `upload/sbom` API endpoint and handles full SBOM
-  upload, i.e. token verification and authentication flow, and posting the
-  authenticated SBOM to DependencyTrack.
-- `oidc.py`: Provides methods to perform basic OIDC token validation and
-  signature verification.
-- `config.py`: Provides methods to load and validate configuration file.
-- `dependencytrack.py`: Provides methods to upload SBOM to DependencyTrack.
-- `models.py`: Provides data models with methods for validation and authentication
-  - `DependencyTrackConfig` model is created from dt config.
-  - `Projects` model is created from projects config and provides methods to
-    verify if a project exists, if an issuer is allowed for a project, and if
-    token claims match the required project claims (i.e. authentication).
-  - `UploadSBOMPayload` model is created from request JSON payload of the
-    `upload/sbom` endpoint and provides methods for validation.
-  - `DependencyTrackPayload` model is for creating the JSON payload to upload
-    an SBOM to the DependencyTrack API.
+- `__init__.py`: Package version and metadata
+- `main.py`: FastAPI app with:
+  - Settings management for application and project settings
+  - `/upload/sbom` API endpoint implementing full authentication and
+    DependencyTrack upload flow (section 3.1, items 4. and 5.)
+- `oidc.py`: OIDC token validation and signature verification using PyJWT
+- `dependencytrack.py`: DependencyTrack API upload client for SBOMs
+- `models.py`: Pydantic data models with validation and authentication:
+  - `Project`: Project settings instance
+  - `Projects`: Map of project IDs to Project instances
+  - `PiaUploadPayload`: Request model for PIA `/upload/sbom` endpoint
+  - `DependencyTrackUploadPayload`: Request model for DependencyTrack API
 
 ### 5.4 Error Handling
 
-- **Configuration Errors**: Fail fast at startup with clear error
+- **Settings Errors**: Fail fast at startup with clear error
 
 - **Authentication Errors**:
   - 400 for malformed POST data
   - 401 for unknown project, issuer and token verification or authentication
     errors
 
-- **DependencyTrack Upload Errors**: Relay HTTP status code to client
+- **DependencyTrack Upload Errors**: 502, if upload fails with an error, or HTTP
+    status code from DependencyTrack
 
 ### 5.5 Logging and Monitoring
 
 Log important events:
-- Configuration re-loads
+- Settings re-load
 - Client connects
 - Token verifications
 - DependencyTrack uploads
@@ -325,7 +315,7 @@ Metrics to track:
 | Token replay | Short-lived tokens (5-10 min), do not re-use token  (future work) |
 | Issuer spoofing | HTTPS-only issuer URLs, strict URL validation |
 | Token forgery | Cryptographic signature verification |
-| Project impersonation | Claim-to-project allowlist validation |
+| Project impersonation | Claim-to-project validation |
 | DoS via OIDC discovery | Cache OIDC discovery, rate limit requests (both future work) |
 | Parsing vulnerabilities | Use minimal schema for unauthenticated POST data, use well-tested JWT library for token parsing |
 
@@ -431,33 +421,36 @@ pipeline {
 
 ### 8.1 Environment
 
-- Python 3.14+
-- Production WSGI server
+- Python 3.13.2+
+- Production ASGI server (e.g., uvicorn)
 - Reverse proxy for TLS termination and rate limiting
 - Container deployment
 
-### 8.2 Configuration
+### 8.2 Settings
 
-Configuration via:
-1. YAML file for project/issuer allowlist
-2. Environment variables for secrets
+Settings via:
+1. YAML file (`projects.yaml`) for project/issuer settings
+2. Environment variables (with `PIA_` prefix) for application settings
 
-Example `config.yaml`:
+Example `projects.yaml`:
 ```yaml
-projects:
-  my-github-project:
-    issuer: "https://token.actions.githubusercontent.com"
-    dt_parent_uuid: "12345678-1234-1234-1234-123456789abc"
-    required_claims:
-      repository: "eclipse-foo/my-github-project"
+my-github-project:
+  issuer: "https://token.actions.githubusercontent.com"
+  dt_parent_uuid: "12345678-1234-1234-1234-123456789abc"
+  required_claims:
+    repository: "eclipse-foo/my-github-project"
 
-  my-jenkins-project:
-    issuer: "https://ci.eclipse.org/my-jenkins-project/oidc"
-    dt_parent_uuid: "87654321-4321-4321-4321-cba987654321"
+my-jenkins-project:
+  issuer: "https://ci.eclipse.org/my-jenkins-project/oidc"
+  dt_parent_uuid: "87654321-4321-4321-4321-cba987654321"
+```
 
-dt:
-  url: "https://sbom.eclipse.org/api/v1/bom"
-  secret: DEPENDENCY_TRACK_API_KEY
+Required environment variables:
+```bash
+PIA_DEPENDENCY_TRACK_API_KEY=<your-api-key>
+PIA_PROJECTS_PATH=/path/to/projects.yaml
+PIA_DEPENDENCY_TRACK_URL=https://sbom.eclipse.org/api/v1/bom  # optional, has default
+PIA_EXPECTED_AUDIENCE=pia.eclipse.org  # optional, has default
 ```
 
 ### 8.3 Scalability
@@ -470,18 +463,18 @@ dt:
 
 ### 9.1. Unit Tests
 
-- Configuration loading and validation
-- Model validation
+- Settings loading and validation (pydantic-settings)
+- Model validation (pydantic models)
 - Token verification and authentication logic with test tokens
 - Error handling paths
 
 ### 9.2. Integration tests
-- PIA Api with mock client
-- DependencyTrack Upload with mock server
+- FastAPI endpoints using httpx async test client
+- DependencyTrack upload with mock server
 
 ## 10. Future Work
 
-- Replace yaml-based project allowlist with database
+- Replace yaml-based projects settings with database
 - Add caching for oidc config and jwks
 - Add monitoring
 - Make upload API async, if sync takes too long
