@@ -1,0 +1,45 @@
+[build-system]
+requires = ["uv_build>=0.9.17,<0.10.0"]
+build-backend = "uv_build"
+
+[project]
+name = "pia"
+version = "0.1.0"
+description = "Project Identity Authority - OIDC-based authentication broker for Eclipse Foundation projects"
+readme = "README.md"
+requires-python = ">=3.13.2"
+dependencies = [
+    "fastapi>=0.115.0",
+    "pydantic>=2.10.0",
+    "pyjwt[crypto]>=2.10.0",
+    "requests>=2.32.0",
+    "pyyaml>=6.0.2",
+    "pydantic-settings>=2.12.0",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.2",
+    "ruff>=0.14.9",
+    "httpx>=0.28.0",
+    "pytest-cov>=7.0.0",
+]
+
+[tool.ruff.lint]
+# Use recommended initial rulet https://docs.astral.sh/ruff/linter/#rule-selection
+select = [
+    "E",
+    "F",
+    "UP",
+    "B",
+    "SIM",
+    "I",
+    "FAST",
+]
+
+[tool.pytest]
+testpaths = ["tests"]
+
+[tool.uv.build-backend]
+module-name = "pia"
+module-root = ""
