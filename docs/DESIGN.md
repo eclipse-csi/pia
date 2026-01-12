@@ -165,7 +165,7 @@ sequenceDiagram
 
 ### 4.1 Endpoints
 
-#### POST /upload/sbom
+#### POST /v1/upload/sbom
 
 Accepts sbom uploads with OIDC authentication.
 
@@ -260,14 +260,14 @@ pia/
 - `__init__.py`: Package version and metadata
 - `main.py`: FastAPI app with:
   - Settings management for application and project settings
-  - `/upload/sbom` API endpoint implementing full authentication and
+  - Upload SBOM API endpoint implementing full authentication and
     DependencyTrack upload flow (section 3.1, items 4. and 5.)
 - `oidc.py`: OIDC token validation and signature verification using PyJWT
 - `dependencytrack.py`: DependencyTrack API upload client for SBOMs
 - `models.py`: Pydantic data models with validation and authentication:
   - `Project`: Project settings instance
   - `Projects`: Map of project IDs to Project instances
-  - `PiaUploadPayload`: Request model for PIA `/upload/sbom` endpoint
+  - `PiaUploadPayload`: Request model for PIA Upload SBOM API endpoint
   - `DependencyTrackUploadPayload`: Request model for DependencyTrack API
 
 ### 5.4 Error Handling
@@ -362,7 +362,7 @@ jobs:
 
       - name: Publish SBOM
         run: |
-          curl -X POST https://pia.eclipse.org/upload/sbom \
+          curl -X POST https://pia.eclipse.org/v1/upload/sbom \
             -H "Content-Type: application/json" \
             -d '{"project_id": "<PROJECT ID>", "token": "${{ steps.token.outputs.ID_TOKEN }}", ...}'
 ```
@@ -407,7 +407,7 @@ pipeline {
         stage('Publish') {
             steps {
                 sh '''
-                  curl -X POST https://pia.eclipse.org/upload/sbom \
+                  curl -X POST https://pia.eclipse.org/v1/upload/sbom \
                     -H "Content-Type: application/json" \
                     -d '{"project_id": "<PROJECT ID>", "token": "${ID_TOKEN}", ...}'
                 '''

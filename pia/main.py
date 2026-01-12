@@ -85,7 +85,7 @@ def _401(msg: str):
     )
 
 
-@app.post("/upload/sbom", status_code=status.HTTP_200_OK)
+@app.post("/v1/upload/sbom", status_code=status.HTTP_200_OK)
 async def upload_sbom(payload: PiaUploadPayload, request: Request):
     """Handle SBOM upload with OIDC authentication.
 

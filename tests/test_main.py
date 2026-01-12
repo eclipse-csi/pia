@@ -44,7 +44,7 @@ def valid_request_data():
 
 
 class TestUploadSBOMEndpoint:
-    """Tests for /upload/sbom endpoint."""
+    """Tests for /v1/upload/sbom endpoint."""
 
     @patch("pia.main.dependencytrack.upload_sbom")
     @patch("pia.main.oidc.verify_token")
@@ -71,7 +71,7 @@ class TestUploadSBOMEndpoint:
         mock_dt_response.content = b"content"
         mock_upload.return_value = mock_dt_response
 
-        response = client.post("/upload/sbom", json=valid_request_data)
+        response = client.post("/v1/upload/sbom", json=valid_request_data)
 
         # Assert response was correctly crafted from dt response
         assert response.status_code == 200
@@ -81,7 +81,7 @@ class TestUploadSBOMEndpoint:
     def test_upload_invalid_json(self, client):
         """Test error with invalid JSON."""
         response = client.post(
-            "/upload/sbom",
+            "/v1/upload/sbom",
             content=b"not-json",
             headers={"Content-Type": "application/json"},
         )
@@ -93,7 +93,7 @@ class TestUploadSBOMEndpoint:
         """Test error with missing required field."""
         del valid_request_data["project_id"]
 
-        response = client.post("/upload/sbom", json=valid_request_data)
+        response = client.post("/v1/upload/sbom", json=valid_request_data)
 
         assert response.status_code == 422
         assert b"project_id" in response.content
@@ -102,7 +102,7 @@ class TestUploadSBOMEndpoint:
         """Test error with unknown project."""
         valid_request_data["project_id"] = "unknown-project"
 
-        response = client.post("/upload/sbom", json=valid_request_data)
+        response = client.post("/v1/upload/sbom", json=valid_request_data)
 
         assert response.status_code == 401
         assert b"Project not allowed" in response.content
@@ -112,7 +112,7 @@ class TestUploadSBOMEndpoint:
         """Test error when initial token decode fails."""
         mock_decode.side_effect = jwt.PyJWTError()
 
-        response = client.post("/upload/sbom", json=valid_request_data)
+        response = client.post("/v1/upload/sbom", json=valid_request_data)
 
         assert response.status_code == 401
         assert b"Invalid token" in response.content
@@ -122,7 +122,7 @@ class TestUploadSBOMEndpoint:
         """Test error when issuer not allowed for project."""
         mock_decode.return_value = {"iss": "https://wrong-issuer.com"}
 
-        response = client.post("/upload/sbom", json=valid_request_data)
+        response = client.post("/v1/upload/sbom", json=valid_request_data)
 
         assert response.status_code == 401
         assert b"Issuer not allowed" in response.content
@@ -138,7 +138,7 @@ class TestUploadSBOMEndpoint:
         }
         mock_verify.side_effect = TokenVerificationError()
 
-        response = client.post("/upload/sbom", json=valid_request_data)
+        response = client.post("/v1/upload/sbom", json=valid_request_data)
 
         assert response.status_code == 401
         assert b"Token verification failed" in response.content
@@ -159,7 +159,7 @@ class TestUploadSBOMEndpoint:
             "repository": "wrong/repo",
         }
 
-        response = client.post("/upload/sbom", json=valid_request_data)
+        response = client.post("/v1/upload/sbom", json=valid_request_data)
 
         assert response.status_code == 401
         assert b"Project token claim mismatch" in response.content
@@ -182,7 +182,7 @@ class TestUploadSBOMEndpoint:
 
         mock_upload.side_effect = DependencyTrackError()
 
-        response = client.post("/upload/sbom", json=valid_request_data)
+        response = client.post("/v1/upload/sbom", json=valid_request_data)
 
         assert response.status_code == 502
         assert b"Failed to upload to DependencyTrack" in response.content
