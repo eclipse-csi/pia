@@ -15,6 +15,12 @@ HttpsUrl = Annotated[
 class Project(BaseModel):
     """Eclipse Foundation Project model."""
 
+    project_id: str
+    """
+    Eclipse Foundation project ID
+    https://www.eclipse.org/projects/handbook/#resources-identifiers
+    """
+
     issuer: HttpsUrl
     """
     Allowed OIDC issuer for this project
@@ -46,34 +52,40 @@ class Project(BaseModel):
 
 
 class Projects(RootModel):
-    """Map of Eclipse Foundation project IDs to Projects
+    """List of Eclipse Foundation projects.
 
     https://www.eclipse.org/projects/handbook/#resources-identifiers
     """
 
-    root: dict[str, Project]
+    root: list[Project]
 
-    def find_project(self, project_id: str) -> Project | None:
-        """Find project in Projects by project ID."""
-        return self.root.get(project_id, None)
+    def has_issuer(self, issuer: str) -> bool:
+        """Check if any project has the given issuer."""
+        return any(project.match_issuer(issuer) for project in self.root)
+
+    def find_project_by_claims(self, token_claims: dict[str, Any]) -> Project | None:
+        """Find project by matching verified token claims.
+
+        Returns Project if found, None otherwise.
+        A project matches if issuer matches AND all required_claims match.
+        """
+        issuer = token_claims["iss"]
+        for project in self.root:
+            if project.match_issuer(issuer) and project.match_claims(token_claims):
+                return project
+        return None
 
     @classmethod
     def from_yaml_file(cls, path: str) -> "Projects":
         """Load Projects from YAML file."""
         with open(path) as f:
-            config_dict = yaml.safe_load(f)
+            config = yaml.safe_load(f)
 
-        return cls.model_validate(config_dict)
+        return cls.model_validate(config)
 
 
 class PiaUploadPayload(BaseModel):
     """Payload for PIA SBOM upload."""
-
-    project_id: str
-    """
-    Eclipse Foundation project ID
-    https://www.eclipse.org/projects/handbook/#resources-identifiers
-    """
 
     product_name: str
     """

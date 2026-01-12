@@ -14,7 +14,6 @@ def verify_token(
     token: str,
     issuer: str,
     expected_audience: str,
-    required_claims: set,
 ) -> dict[str, Any]:
     """Verify JWT token signature using OIDC discovery and return claims.
     Raises TokenVerificationError, if verification fails
@@ -53,7 +52,7 @@ def verify_token(
                 verify_exp=True,
                 verify_aud=True,
                 verify_iat=True,
-                require={"aud", "exp", "iat"} | required_claims,
+                require={"aud", "exp", "iat"},
             ),
         )
 

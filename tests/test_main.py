@@ -35,7 +35,6 @@ def client(setup_env):
 def valid_request_data():
     """Valid request data for SBOM upload."""
     return {
-        "project_id": "github-project",
         "product_name": "test-product",
         "product_version": "1.0.0",
         "bom": "bom",
@@ -91,31 +90,12 @@ class TestUploadSBOMEndpoint:
 
     def test_upload_missing_field(self, client, valid_request_data):
         """Test error with missing required field."""
-        del valid_request_data["project_id"]
+        del valid_request_data["product_name"]
 
         response = client.post("/v1/upload/sbom", json=valid_request_data)
 
         assert response.status_code == 422
-        assert b"project_id" in response.content
-
-    def test_upload_unknown_project(self, client, valid_request_data):
-        """Test error with unknown project."""
-        valid_request_data["project_id"] = "unknown-project"
-
-        response = client.post("/v1/upload/sbom", json=valid_request_data)
-
-        assert response.status_code == 401
-        assert b"Project not allowed" in response.content
-
-    @patch("pia.main.jwt.decode")
-    def test_upload_token_decode_fails(self, mock_decode, client, valid_request_data):
-        """Test error when initial token decode fails."""
-        mock_decode.side_effect = jwt.PyJWTError()
-
-        response = client.post("/v1/upload/sbom", json=valid_request_data)
-
-        assert response.status_code == 401
-        assert b"Invalid token" in response.content
+        assert b"product_name" in response.content
 
     @patch("pia.main.jwt.decode")
     def test_upload_issuer_not_allowed(self, mock_decode, client, valid_request_data):
@@ -126,6 +106,16 @@ class TestUploadSBOMEndpoint:
 
         assert response.status_code == 401
         assert b"Issuer not allowed" in response.content
+
+    @patch("pia.main.jwt.decode")
+    def test_upload_token_decode_fails(self, mock_decode, client, valid_request_data):
+        """Test error when initial token decode fails."""
+        mock_decode.side_effect = jwt.PyJWTError()
+
+        response = client.post("/v1/upload/sbom", json=valid_request_data)
+
+        assert response.status_code == 401
+        assert b"Invalid token" in response.content
 
     @patch("pia.main.jwt.decode")
     @patch("pia.main.oidc.verify_token")
@@ -145,15 +135,15 @@ class TestUploadSBOMEndpoint:
 
     @patch("pia.main.jwt.decode")
     @patch("pia.main.oidc.verify_token")
-    def test_upload_claims_mismatch(
+    def test_upload_no_matching_project(
         self, mock_verify, mock_decode, client, valid_request_data
     ):
-        """Test error when token claims don't match required claims."""
+        """Test error when no project matches the verified token claims."""
         mock_decode.return_value = {
             "iss": "https://token.actions.githubusercontent.com"
         }
 
-        # Claims don't match required repository
+        # Claims don't match any project's required claims
         mock_verify.return_value = {
             "iss": "https://token.actions.githubusercontent.com",
             "repository": "wrong/repo",
@@ -162,7 +152,7 @@ class TestUploadSBOMEndpoint:
         response = client.post("/v1/upload/sbom", json=valid_request_data)
 
         assert response.status_code == 401
-        assert b"Project token claim mismatch" in response.content
+        assert b"No matching project found for token claims" in response.content
 
     @patch("pia.main.dependencytrack.upload_sbom")
     @patch("pia.main.jwt.decode")

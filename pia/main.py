@@ -92,13 +92,6 @@ async def upload_sbom(payload: PiaUploadPayload, request: Request):
     Implements authentication flow from DESIGN.md section 3.1.1.
     """
     projects: Projects = request.app.state.projects
-    project_id: str = payload.project_id
-
-    # Verify project is allowed
-    project = projects.find_project(project_id)
-    if not project:
-        logger.warning(f"Unknown project: {project_id}")
-        _401("Project not allowed")
 
     # Extract issuer from unverified token
     try:
@@ -111,13 +104,14 @@ async def upload_sbom(payload: PiaUploadPayload, request: Request):
         logger.warning(f"Token decode failed: {e}")
         _401("Invalid token")
 
-    # Since we already have the issuer, we might as well check, if it is
-    # allowed, to fail early, before fetching keys, etc. Note that we can only
-    # trust an allowed issuer after having verified the token below.
-    if not project.match_issuer(unverified_issuer):
-        logger.warning(
-            f"Issuer {unverified_issuer} not allowed for project {project_id}"
-        )
+    # Check if issuer exists in any project configuration to fail early
+    #
+    # NOTE: This is an expensive operation (iterates over all projects) for a
+    # completely unauthenticated request. Consider to ...
+    # - make less expensive (optimize with db), or
+    # - match against issuer constants (full for GitHub, prefix-only for Jenkins)
+    if not projects.has_issuer(unverified_issuer):
+        logger.warning(f"Issuer {unverified_issuer} not allowed")
         _401("Issuer not allowed")
 
     # Full token verification
@@ -126,19 +120,20 @@ async def upload_sbom(payload: PiaUploadPayload, request: Request):
             payload.token,
             unverified_issuer,
             settings.expected_audience,
-            set(project.required_claims.keys()),
         )
     except oidc.TokenVerificationError as e:
         logger.warning(f"Token verification failed: {e}")
         _401("Token verification failed")
 
-    # Project authentication
-    if not project.match_claims(verified_claims):
-        logger.warning(f"Token claims mismatch for project {project_id}")
-        _401("Project token claim mismatch")
+    # Find project by matching verified token claims
+    # NOTE: Returns first match
+    project = projects.find_project_by_claims(verified_claims)
+    if not project:
+        logger.warning(f"No matching project found for token claims: {verified_claims}")
+        _401("No matching project found for token claims")
 
     logger.info(
-        f"Successfully authenticated project {project_id} "
+        f"Successfully authenticated project {project.project_id} "
         f"with issuer {verified_claims['iss']}"
     )
 
@@ -158,7 +153,7 @@ async def upload_sbom(payload: PiaUploadPayload, request: Request):
             dt_payload,
         )
         logger.info(
-            f"Uploaded SBOM for {payload.project_id}/{payload.product_name} "
+            f"Uploaded SBOM for {project.project_id}/{payload.product_name} "
             f"to DependencyTrack (status: {dt_response.status_code})"
         )
 

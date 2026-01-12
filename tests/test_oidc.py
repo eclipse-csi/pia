@@ -18,7 +18,6 @@ class TestVerifyToken:
         token = "test.jwt.token"
         issuer = "https://example.com"
         expected_audience = "test-audience"
-        required_claims = {"repository"}
 
         mock_signing_key = Mock()
         mock_signing_key.key = "mock-key"
@@ -40,7 +39,7 @@ class TestVerifyToken:
         # Mock jwt.decode result
         mock_decode.return_value = "mock_claims"
 
-        result = verify_token(token, issuer, expected_audience, required_claims)
+        result = verify_token(token, issuer, expected_audience)
 
         # Assert result is return value of jwt.decode
         assert result == "mock_claims"
@@ -64,7 +63,7 @@ class TestVerifyToken:
                 verify_exp=True,
                 verify_aud=True,
                 verify_iat=True,
-                require={"aud", "exp", "iat"} | required_claims,
+                require={"aud", "exp", "iat"},
             ),
         )
 
@@ -75,7 +74,7 @@ class TestVerifyToken:
         with pytest.raises(
             TokenVerificationError, match="Failed to fetch OIDC configuration"
         ):
-            verify_token("token", "issuer", "audience", set())
+            verify_token("token", "issuer", "audience")
 
     @patch("pia.oidc.requests.get")
     def test_verify_token_missing_jwks_uri(self, mock_get):
@@ -85,7 +84,7 @@ class TestVerifyToken:
         mock_get.return_value = mock_response
 
         with pytest.raises(TokenVerificationError, match="missing 'jwks_uri'"):
-            verify_token("token", "issuer", "audience", set())
+            verify_token("token", "issuer", "audience")
 
     @patch("pia.oidc.jwt.decode")
     @patch("pia.oidc.jwt.PyJWKClient")
@@ -106,4 +105,4 @@ class TestVerifyToken:
         mock_decode.side_effect = jwt.InvalidSignatureError("Invalid signature")
 
         with pytest.raises(TokenVerificationError):
-            verify_token("token", "issuer", "audience", set())
+            verify_token("token", "issuer", "audience")
