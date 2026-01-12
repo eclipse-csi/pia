@@ -112,7 +112,6 @@ class TestUploadSBOMPayload:
             "product_name": "test-product",
             "product_version": "1.0.0",
             "bom": "valid_bom",
-            "token": "eyJhbGciOiJSUzI1NiJ9.test.token",
         }
 
     def test_valid(self, valid_request_data):
@@ -122,7 +121,6 @@ class TestUploadSBOMPayload:
         assert payload.product_name == "test-product"
         assert payload.product_version == "1.0.0"
         assert payload.bom == "valid_bom"
-        assert payload.token == "eyJhbGciOiJSUzI1NiJ9.test.token"
 
     def test_missing_required_fields(self, valid_request_data):
         """Test error when a required field is missing."""

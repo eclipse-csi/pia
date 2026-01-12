@@ -2,9 +2,10 @@
 
 import logging
 from contextlib import asynccontextmanager
+from typing import Annotated
 
 import jwt
-from fastapi import FastAPI, HTTPException, Request, Response, status
+from fastapi import FastAPI, Header, HTTPException, Request, Response, status
 from pydantic import HttpUrl
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -86,17 +87,29 @@ def _401(msg: str):
 
 
 @app.post("/v1/upload/sbom", status_code=status.HTTP_200_OK)
-async def upload_sbom(payload: PiaUploadPayload, request: Request):
+async def upload_sbom(
+    payload: PiaUploadPayload,
+    request: Request,
+    authorization: Annotated[str, Header()],
+):
     """Handle SBOM upload with OIDC authentication.
 
     Implements authentication flow from DESIGN.md section 3.1.1.
+    Token must be provided as Bearer token in Authorization header (RFC6750).
     """
+    # ==========================================================================
+    # Handle Auth Header
     projects: Projects = request.app.state.projects
+
+    # Extract Bearer token from Authorization header
+    if not authorization.startswith("Bearer "):
+        _401("Invalid Authorization header format")
+    token = authorization[7:]  # Remove "Bearer " prefix
 
     # Extract issuer from unverified token
     try:
         unverified_claims = jwt.decode(
-            payload.token,
+            token,
             options=dict(verify_signature=False, require=["iss"]),
         )
         unverified_issuer: str = unverified_claims["iss"]
@@ -117,7 +130,7 @@ async def upload_sbom(payload: PiaUploadPayload, request: Request):
     # Full token verification
     try:
         verified_claims = oidc.verify_token(
-            payload.token,
+            token,
             unverified_issuer,
             settings.expected_audience,
         )
@@ -136,6 +149,9 @@ async def upload_sbom(payload: PiaUploadPayload, request: Request):
         f"Successfully authenticated project {project.project_id} "
         f"with issuer {verified_claims['iss']}"
     )
+
+    # ==========================================================================
+    # Handle Payload
 
     # Create DependencyTrack payload
     dt_payload = DependencyTrackUploadPayload(

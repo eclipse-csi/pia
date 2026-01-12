@@ -103,11 +103,6 @@ class PiaUploadPayload(BaseModel):
     Base64-encoded CycloneDX JSON SBOM
     """
 
-    token: str
-    """
-    OIDC token used to authenticate PIA SBOM upload
-    """
-
     model_config = ConfigDict(use_attribute_docstrings=True)
 
 

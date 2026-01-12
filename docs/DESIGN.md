@@ -113,6 +113,7 @@ sequenceDiagram
 
 3. **Publish Request**: Publisher sends POST request to PIA:
 
+   - `Authorization` header: Bearer token containing OIDC token (RFC6750)
    - `product_name`: Name of product for which the SBOM is produced. This field
      is required by DependencyTrack to aggregate SBOMs by product within a
      project. We ask the Publisher to provide it, so that we don't have to
@@ -122,7 +123,6 @@ sequenceDiagram
      provide it, so that we don't have to parse the SBOM (see
      `metadata.component.version`).
    - `bom`: Base64-encoded CycloneDX JSON SBOM
-   - `token`: OIDC token
 
 4. **Token Verification and Authentication**: PIA verifies POST data token
 
@@ -168,24 +168,30 @@ sequenceDiagram
 
 Accepts sbom uploads with OIDC authentication.
 
-**Request:**
+**Request Headers:**
+```
+Authorization: Bearer <JWT ID token>
+Content-Type: application/json
+```
+
+**Request Body:**
 ```json
 {
   "product_name": "string",         // Eclipse product name
   "product_version": "string",      // Eclipse product version
   "bom": "string",                  // CycloneDX JSON SBOM (base64-encoded)
-  "token": "string",                // JWT ID token
 }
 ```
 
 **Response:**
-- `400 Bad request`: Invalid request data
 - `401 Unauthorized`:
+  - Invalid Authorization header format
   - Invalid token
   - Expired token
   - Token verification error
   - Issuer not allowed
   - No matching project found for token claims
+- `422 Unprocessable Entity`: Missing Authorization header or invalid JSON
 - `502`: DependencyTrack post request failed
 - `*`: Relay DependencyTrack status code
 
@@ -273,7 +279,7 @@ pia/
 - **Settings Errors**: Fail fast at startup with clear error
 
 - **Authentication Errors**:
-  - 400 for malformed POST data
+  - 422 for malformed POST data
   - 401 for unknown issuer, token verification errors, or no matching project
     found for verified token claims
 
@@ -361,8 +367,9 @@ jobs:
       - name: Publish SBOM
         run: |
           curl -X POST https://pia.eclipse.org/v1/upload/sbom \
+            -H "Authorization: Bearer ${{ steps.token.outputs.ID_TOKEN }}" \
             -H "Content-Type: application/json" \
-            -d '{"token": "${{ steps.token.outputs.ID_TOKEN }}", "product_name": "...", "product_version": "...", "bom": "..."}'
+            -d '{"product_name": "...", "product_version": "...", "bom": "..."}'
 ```
 
 ### 7.2 Jenkins
@@ -406,8 +413,9 @@ pipeline {
             steps {
                 sh '''
                   curl -X POST https://pia.eclipse.org/v1/upload/sbom \
+                    -H "Authorization: Bearer ${ID_TOKEN}" \
                     -H "Content-Type: application/json" \
-                    -d '{"token": "${ID_TOKEN}", "product_name": "...", "product_version": "...", "bom": "..."}'
+                    -d '{"product_name": "...", "product_version": "...", "bom": "..."}'
                 '''
             }
         }
@@ -485,6 +493,7 @@ PIA_EXPECTED_AUDIENCE=pia.eclipse.org  # optional, has default
 - [GitHub OIDC Documentation](https://docs.github.com/en/actions/deployment/security-hardening-your-deployments/about-security-hardening-with-openid-connect)
 - [Jenkins OIDC Provider Plugin](https://plugins.jenkins.io/oidc-provider/)
 - [PyJWT Documentation](https://pyjwt.readthedocs.io/)
+- [RFC6750 - OAuth 2.0 Bearer Token Usage](https://datatracker.ietf.org/doc/html/rfc6750)
 - [End-to-end Proof of Concept](https://gitlab.eclipse.org/lukpueh/oidc-upload-demo)
 - [Concept Document (restricted access)](https://docs.google.com/document/d/1DuvC7vRsbJQpY9q4selLuAuAO4AUXiyEmHrK-xQ6GW0/edit?tab=t.0#heading=h.k5o4i1fbhpd2)
 
