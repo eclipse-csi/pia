@@ -113,7 +113,7 @@ sequenceDiagram
 
 3. **Publish Request**: Publisher sends POST request to PIA:
 
-   - `project_id`: Unique Eclipse Foundation project ID.
+   - `Authorization` header: Bearer token containing OIDC token (RFC6750)
    - `product_name`: Name of product for which the SBOM is produced. This field
      is required by DependencyTrack to aggregate SBOMs by product within a
      project. We ask the Publisher to provide it, so that we don't have to
@@ -123,7 +123,6 @@ sequenceDiagram
      provide it, so that we don't have to parse the SBOM (see
      `metadata.component.version`).
    - `bom`: Base64-encoded CycloneDX JSON SBOM
-   - `token`: OIDC token
 
 4. **Token Verification and Authentication**: PIA verifies POST data token
 
@@ -135,7 +134,7 @@ sequenceDiagram
    - `X-Api-Key`: Use internally stored, DependencyTrack access token
    - `projectName`: Use `product_name` from POST data
    - `projectVersion`: Use `product_version` from POST data.
-   - `parentUUID`: Look up internally via `project_id`
+   - `parentUUID`: Look up internally
    - `autoCreate`: `true` (creates new subcategory for new `projectName`)
    - `bom`: Use `bom` from POST data
 
@@ -143,52 +142,56 @@ sequenceDiagram
 
 1. Basic POST Data Validation
    1. Validate basic POST data schema
-   2. Verify `project_id` is known and allowed
 2. Issuer Validation
    1. Decode token without any verification
    2. Extract issuer
-   3. Verify issuer is known and allowed for `project_id`
+   3. Verify issuer is known
 3. Token Key Discovery
    1. Fetch OIDC configuration from `{issuer}/.well-known/openid-configuration`
    2. Extract `jwks_uri` from configuration
    3. Fetch public keys from `jwks_uri`
    4. Match key using `kid` claim from token header
 4. Token Validation and Signature Verification
-   1. Verify required claims are present
+   1. Verify generally required claims are present
    2. Verify token issued at time and expiry
    3. Verify audience matches expected value
    4. Verify signature using RSA256
 5. Project Authorization
-   1. Verify that platform specific claims are correct for `project_id`
+   1. Match verified token claims (issuer + required_claims) against all project
+      configurations to find the authorized project
 
 ## 4. API Design
 
 ### 4.1 Endpoints
 
-#### POST /upload/sbom
+#### POST /v1/upload/sbom
 
 Accepts sbom uploads with OIDC authentication.
 
-**Request:**
+**Request Headers:**
+```
+Authorization: Bearer <JWT ID token>
+Content-Type: application/json
+```
+
+**Request Body:**
 ```json
 {
-  "project_id": "string",           // Eclipse project ID
   "product_name": "string",         // Eclipse product name
   "product_version": "string",      // Eclipse product version
   "bom": "string",                  // CycloneDX JSON SBOM (base64-encoded)
-  "token": "string",                // JWT ID token
 }
 ```
 
 **Response:**
-- `400 Bad request`: Invalid request data
 - `401 Unauthorized`:
-  - Project not allowed
+  - Invalid Authorization header format
   - Invalid token
   - Expired token
   - Token verification error
   - Issuer not allowed
-  - Project token claim mismatch
+  - No matching project found for token claims
+- `422 Unprocessable Entity`: Missing Authorization header or invalid JSON
 - `502`: DependencyTrack post request failed
 - `*`: Relay DependencyTrack status code
 
@@ -205,10 +208,11 @@ PIA requires settings for:
     - `PIA_EXPECTED_AUDIENCE`: Expected audience for OIDC tokens
       (default: `pia.eclipse.org`)
 
-2. **Projects**: YAML file (e.g. `projects.yaml`) that maps project ID to
-    allowed issuer, required claims, and DependencyTrack project UUID. Schema:
+2. **Projects**: YAML file (e.g. `projects.yaml`) containing a list of project
+    configurations with allowed issuer, required claims, and DependencyTrack
+    project UUID. Schema:
     ```yaml
-    <project_id>:
+    - project_id: <project_id>
       issuer: <issuer_url>
       dt_parent_uuid: <uuid>  # DependencyTrack project UUID
       required_claims:        # Omit for Jenkins (issuer is enough)
@@ -260,14 +264,14 @@ pia/
 - `__init__.py`: Package version and metadata
 - `main.py`: FastAPI app with:
   - Settings management for application and project settings
-  - `/upload/sbom` API endpoint implementing full authentication and
+  - Upload SBOM API endpoint implementing full authentication and
     DependencyTrack upload flow (section 3.1, items 4. and 5.)
 - `oidc.py`: OIDC token validation and signature verification using PyJWT
 - `dependencytrack.py`: DependencyTrack API upload client for SBOMs
 - `models.py`: Pydantic data models with validation and authentication:
   - `Project`: Project settings instance
-  - `Projects`: Map of project IDs to Project instances
-  - `PiaUploadPayload`: Request model for PIA `/upload/sbom` endpoint
+  - `Projects`: List of Project instances
+  - `PiaUploadPayload`: Request model for PIA Upload SBOM API endpoint
   - `DependencyTrackUploadPayload`: Request model for DependencyTrack API
 
 ### 5.4 Error Handling
@@ -275,9 +279,9 @@ pia/
 - **Settings Errors**: Fail fast at startup with clear error
 
 - **Authentication Errors**:
-  - 400 for malformed POST data
-  - 401 for unknown project, issuer and token verification or authentication
-    errors
+  - 422 for malformed POST data
+  - 401 for unknown issuer, token verification errors, or no matching project
+    found for verified token claims
 
 - **DependencyTrack Upload Errors**: 502, if upload fails with an error, or HTTP
     status code from DependencyTrack
@@ -293,7 +297,7 @@ Log important events:
 
 Metrics to track:
 - Client connect attempts by IP
-- Client connect attempts by `project_id` and `product_name`
+- Client connect attempts by `product_name` and `product_version`
 - Token verification time
 - DependencyTrack upload time
 - Total API response time
@@ -362,9 +366,10 @@ jobs:
 
       - name: Publish SBOM
         run: |
-          curl -X POST https://pia.eclipse.org/upload/sbom \
+          curl -X POST https://pia.eclipse.org/v1/upload/sbom \
+            -H "Authorization: Bearer ${{ steps.token.outputs.ID_TOKEN }}" \
             -H "Content-Type: application/json" \
-            -d '{"project_id": "<PROJECT ID>", "token": "${{ steps.token.outputs.ID_TOKEN }}", ...}'
+            -d '{"product_name": "...", "product_version": "...", "bom": "..."}'
 ```
 
 ### 7.2 Jenkins
@@ -407,9 +412,10 @@ pipeline {
         stage('Publish') {
             steps {
                 sh '''
-                  curl -X POST https://pia.eclipse.org/upload/sbom \
+                  curl -X POST https://pia.eclipse.org/v1/upload/sbom \
+                    -H "Authorization: Bearer ${ID_TOKEN}" \
                     -H "Content-Type: application/json" \
-                    -d '{"project_id": "<PROJECT ID>", "token": "${ID_TOKEN}", ...}'
+                    -d '{"product_name": "...", "product_version": "...", "bom": "..."}'
                 '''
             }
         }
@@ -434,13 +440,13 @@ Settings via:
 
 Example `projects.yaml`:
 ```yaml
-my-github-project:
+- project_id: my-github-project
   issuer: "https://token.actions.githubusercontent.com"
   dt_parent_uuid: "12345678-1234-1234-1234-123456789abc"
   required_claims:
     repository: "eclipse-foo/my-github-project"
 
-my-jenkins-project:
+- project_id: my-jenkins-project
   issuer: "https://ci.eclipse.org/my-jenkins-project/oidc"
   dt_parent_uuid: "87654321-4321-4321-4321-cba987654321"
 ```
@@ -487,6 +493,7 @@ PIA_EXPECTED_AUDIENCE=pia.eclipse.org  # optional, has default
 - [GitHub OIDC Documentation](https://docs.github.com/en/actions/deployment/security-hardening-your-deployments/about-security-hardening-with-openid-connect)
 - [Jenkins OIDC Provider Plugin](https://plugins.jenkins.io/oidc-provider/)
 - [PyJWT Documentation](https://pyjwt.readthedocs.io/)
+- [RFC6750 - OAuth 2.0 Bearer Token Usage](https://datatracker.ietf.org/doc/html/rfc6750)
 - [End-to-end Proof of Concept](https://gitlab.eclipse.org/lukpueh/oidc-upload-demo)
 - [Concept Document (restricted access)](https://docs.google.com/document/d/1DuvC7vRsbJQpY9q4selLuAuAO4AUXiyEmHrK-xQ6GW0/edit?tab=t.0#heading=h.k5o4i1fbhpd2)
 
