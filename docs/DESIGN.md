@@ -233,33 +233,8 @@ PIA requires settings for:
 - **Linting**: `ruff`
 - **Python Project Management**: `uv`
 
-### 5.2 Project Structure
+### 5.2 Core Modules
 
-```
-pia/
-    docs/
-        DESIGN.md            # Design document (this)
-    pia/
-        __init__.py
-        dependencytrack.py
-        main.py
-        models.py
-        oidc.py
-    tests/
-        conftest.py
-        test_dependencytrack.py
-        test_main.py
-        test_models.py
-        test_oidc.py
-    projects.yaml.example    # Example projects settings
-    pyproject.toml
-    README.md
-    .gitignore
-```
-
-### 5.3 Core Modules
-
-- `__init__.py`: Package version and metadata
 - `main.py`: FastAPI app with:
   - Settings management for application and project settings
   - Upload SBOM API endpoint implementing full authentication and
@@ -272,7 +247,7 @@ pia/
   - `PiaUploadPayload`: Request model for PIA Upload SBOM API endpoint
   - `DependencyTrackUploadPayload`: Request model for DependencyTrack API
 
-### 5.4 Error Handling
+### 5.3 Error Handling
 
 - **Settings Errors**: Fail fast at startup with clear error
 
@@ -284,7 +259,7 @@ pia/
 - **DependencyTrack Upload Errors**: 502, if upload fails with an error, or HTTP
     status code from DependencyTrack
 
-### 5.5 Logging and Monitoring
+### 5.4 Logging and Monitoring
 
 Log important events:
 - Settings re-load
