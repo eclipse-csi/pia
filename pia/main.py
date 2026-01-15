@@ -31,7 +31,7 @@ logger.info("PIA application settings loaded successfully")
 # Lifespan wrapper to load projects from file only once on app startup
 # see https://fastapi.tiangolo.com/advanced/events/
 @asynccontextmanager
-async def lifespan(app: FastAPI):
+async def load_project_settings_on_startup(app: FastAPI):
     app.state.projects = Projects.from_yaml_file(settings.projects_path)
     logger.info(f"Loaded projects from {settings.projects_path}")
     yield
@@ -42,7 +42,7 @@ app = FastAPI(
     title="Project Identity Authority (PIA)",
     description="OIDC-based authentication broker for Eclipse Foundation projects",
     version=__version__,
-    lifespan=lifespan,
+    lifespan=load_project_settings_on_startup,
 )
 logger.info("PIA application initialized successfully")
 
