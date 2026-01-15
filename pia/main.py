@@ -6,10 +6,9 @@ from typing import Annotated
 
 import jwt
 from fastapi import FastAPI, Header, HTTPException, Request, Response, status
-from pydantic import HttpUrl
-from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from . import __version__, dependencytrack, oidc
+from .config import Settings
 from .models import (
     DependencyTrackUploadPayload,
     PiaUploadPayload,
@@ -23,37 +22,6 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-
-# Define settings
-class Settings(BaseSettings):
-    """Application settings loaded from environment variables
-
-    e.g. PIA_DEPENDENCY_TRACK_API_KEY -> dependency_track_api_key
-    """
-
-    dependency_track_api_key: str
-    """
-    DependencyTrack API Key
-    https://docs.dependencytrack.org/integrations/rest-api/
-    """
-    projects_path: str
-    """
-    Path to projects.yaml
-    """
-
-    expected_audience: str = "pia.eclipse.org"
-    """
-    Expected value for "aud" claim in all OIDC tokens
-    """
-
-    dependency_track_url: HttpUrl = "https://sbom.eclipse.org/api/v1/bom"
-    """
-    DependencyTrack SBOM upload URL
-    """
-
-    model_config = SettingsConfigDict(env_prefix="PIA_", use_attribute_docstrings=True)
-
-
 # Load settings
 settings = Settings()
 logger.info("PIA application settings loaded successfully")
@@ -62,7 +30,7 @@ logger.info("PIA application settings loaded successfully")
 # Lifespan wrapper to load projects from file only once on app startup
 # see https://fastapi.tiangolo.com/advanced/events/
 @asynccontextmanager
-async def lifespan(app: FastAPI):
+async def load_project_settings_on_startup(app: FastAPI):
     app.state.projects = Projects.from_yaml_file(settings.projects_path)
     logger.info(f"Loaded projects from {settings.projects_path}")
     yield
@@ -73,7 +41,7 @@ app = FastAPI(
     title="Project Identity Authority (PIA)",
     description="OIDC-based authentication broker for Eclipse Foundation projects",
     version=__version__,
-    lifespan=lifespan,
+    lifespan=load_project_settings_on_startup,
 )
 logger.info("PIA application initialized successfully")
 
