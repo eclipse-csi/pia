@@ -39,6 +39,7 @@ test-coverage: ## Run tests with coverage report
 .PHONY: lint
 lint: ## Check code quality with ruff
 	uv run ruff check && uv run ruff format --check
+	uv run mypy pia tests
 
 .PHONY: lint-fix
 lint-fix: ## Auto-fix linting issues and format code

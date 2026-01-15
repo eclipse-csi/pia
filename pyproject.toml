@@ -24,6 +24,9 @@ dev = [
     "ruff>=0.14.9",
     "httpx>=0.28.0",
     "pytest-cov>=7.0.0",
+    "mypy>=1.19.1",
+    "types-PyYAML>=6.0.0",
+    "types-requests>=2.32.0",
 ]
 
 [tool.ruff.lint]
@@ -40,6 +43,9 @@ select = [
 
 [tool.pytest]
 testpaths = ["tests"]
+
+[tool.mypy]
+plugins = ["pydantic.mypy"]
 
 [tool.uv.build-backend]
 module-name = "pia"
