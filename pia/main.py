@@ -2,7 +2,7 @@
 
 import logging
 from contextlib import asynccontextmanager
-from typing import Annotated
+from typing import Annotated, NoReturn
 
 import jwt
 from fastapi import FastAPI, Header, HTTPException, Request, Response, status
@@ -46,7 +46,7 @@ class Settings(BaseSettings):
     Expected value for "aud" claim in all OIDC tokens
     """
 
-    dependency_track_url: HttpUrl = "https://sbom.eclipse.org/api/v1/bom"
+    dependency_track_url: HttpUrl = "https://sbom.eclipse.org/api/v1/bom"  # type: ignore[assignment]
     """
     DependencyTrack SBOM upload URL
     """
@@ -78,7 +78,7 @@ app = FastAPI(
 logger.info("PIA application initialized successfully")
 
 
-def _401(msg: str):
+def _401(msg: str) -> NoReturn:
     """Helper to return 401"""
     raise HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
