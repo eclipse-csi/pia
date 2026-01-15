@@ -6,10 +6,9 @@ from typing import Annotated
 
 import jwt
 from fastapi import FastAPI, Header, HTTPException, Request, Response, status
-from pydantic import HttpUrl
-from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from . import __version__, dependencytrack, oidc
+from .config import Settings
 from .models import (
     DependencyTrackUploadPayload,
     PiaUploadPayload,
@@ -22,37 +21,6 @@ logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
 )
 logger = logging.getLogger(__name__)
-
-
-# Define settings
-class Settings(BaseSettings):
-    """Application settings loaded from environment variables
-
-    e.g. PIA_DEPENDENCY_TRACK_API_KEY -> dependency_track_api_key
-    """
-
-    dependency_track_api_key: str
-    """
-    DependencyTrack API Key
-    https://docs.dependencytrack.org/integrations/rest-api/
-    """
-    projects_path: str
-    """
-    Path to projects.yaml
-    """
-
-    expected_audience: str = "pia.eclipse.org"
-    """
-    Expected value for "aud" claim in all OIDC tokens
-    """
-
-    dependency_track_url: HttpUrl = "https://sbom.eclipse.org/api/v1/bom"
-    """
-    DependencyTrack SBOM upload URL
-    """
-
-    model_config = SettingsConfigDict(env_prefix="PIA_", use_attribute_docstrings=True)
-
 
 # Load settings
 settings = Settings()
