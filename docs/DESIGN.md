@@ -1,7 +1,5 @@
 # PIA - Project Identity Authority
 
-Design Document v0.1
-
 ## 1. Overview
 
 ### 1.1 Purpose
