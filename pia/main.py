@@ -127,6 +127,7 @@ async def upload_sbom(
         project_name=payload.product_name,
         project_version=payload.product_version,
         parent_uuid=project.dt_parent_uuid,
+        is_latest=payload.is_latest,
         bom=payload.bom,
     )
 

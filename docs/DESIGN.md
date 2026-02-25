@@ -121,6 +121,8 @@ sequenceDiagram
      provide it, so that we don't have to parse the SBOM (see
      `metadata.component.version`).
    - `bom`: Base64-encoded CycloneDX JSON SBOM
+   - `is_latest`: Whether this SBOM should be marked as the latest version in
+     DependencyTrack (optional, default: `true`)
 
 4. **Token Verification and Authentication**: PIA verifies POST data token
 
@@ -134,6 +136,7 @@ sequenceDiagram
    - `projectVersion`: Use `product_version` from POST data.
    - `parentUUID`: Look up internally
    - `autoCreate`: `true` (creates new subcategory for new `projectName`)
+   - `isLatest`: Use `is_latest` from POST data
    - `bom`: Use `bom` from POST data
 
 #### 3.1.1 Token Verification and Authentication Flow
@@ -178,6 +181,7 @@ Content-Type: application/json
   "product_name": "string",         // Eclipse product name
   "product_version": "string",      // Eclipse product version
   "bom": "string",                  // CycloneDX JSON SBOM (base64-encoded)
+  "is_latest": true                 // Mark as latest version in DependencyTrack (optional, default: true)
 }
 ```
 

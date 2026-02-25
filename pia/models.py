@@ -103,6 +103,11 @@ class PiaUploadPayload(BaseModel):
     Base64-encoded CycloneDX JSON SBOM
     """
 
+    is_latest: bool = True
+    """
+    Whether this SBOM should be marked as the latest version in DependencyTrack
+    """
+
     model_config = ConfigDict(use_attribute_docstrings=True)
 
 
@@ -113,6 +118,7 @@ class DependencyTrackUploadPayload(BaseModel):
     project_version: str = Field(serialization_alias="projectVersion")
     parent_uuid: str = Field(serialization_alias="parentUUID")
     auto_create: bool = Field(default=True, serialization_alias="autoCreate")
+    is_latest: bool = Field(serialization_alias="isLatest")
     bom: str
 
     def to_dict(self):

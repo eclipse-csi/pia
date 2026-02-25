@@ -19,6 +19,7 @@ def dt_payload():
         project_name="test-product",
         project_version="1.0.0",
         parent_uuid="parent-uuid-123",
+        is_latest=True,
         bom="dGVzdC1ib20tZGF0YQ==",  # base64 encoded
     )
 
@@ -41,6 +42,7 @@ class TestUploadSBOM:
                 "projectVersion": "1.0.0",
                 "parentUUID": "parent-uuid-123",
                 "autoCreate": True,
+                "isLatest": True,
                 "bom": "dGVzdC1ib20tZGF0YQ==",
             },
             headers={

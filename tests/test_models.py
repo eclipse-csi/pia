@@ -121,32 +121,34 @@ class TestUploadSBOMPayload:
         assert payload.product_name == "test-product"
         assert payload.product_version == "1.0.0"
         assert payload.bom == "valid_bom"
+        assert payload.is_latest is True
 
-    def test_missing_required_fields(self, valid_request_data):
+        payload = PiaUploadPayload(**valid_request_data, is_latest=False)
+        assert payload.is_latest is False
+
+    @pytest.mark.parametrize("field", ["product_name", "product_version", "bom"])
+    def test_missing_required_field(self, valid_request_data, field):
         """Test error when a required field is missing."""
-        del valid_request_data["product_name"]
+        del valid_request_data[field]
 
         with pytest.raises(ValidationError):
             PiaUploadPayload(**valid_request_data)
 
-        # Assert all fields are required
-        assert all(
-            field_info.is_required()
-            for field_info in PiaUploadPayload.model_fields.values()
-        )
-
-    def test_wrong_type(self, valid_request_data):
-        """Test error when field has wrong type."""
-        valid_request_data["product_name"] = 123
+    @pytest.mark.parametrize(
+        "field,value",
+        [
+            ("product_name", 123),
+            ("product_version", 123),
+            ("bom", 123),
+            ("is_latest", "not-a-bool"),
+        ],
+    )
+    def test_wrong_type(self, valid_request_data, field, value):
+        """Test error when a field has the wrong type."""
+        valid_request_data[field] = value
 
         with pytest.raises(ValidationError):
             PiaUploadPayload(**valid_request_data)
-
-        # Assert all fields are correctly annotated
-        assert all(
-            field_info.annotation is str
-            for field_info in PiaUploadPayload.model_fields.values()
-        )
 
 
 class TestDependencyTrackPayload:
@@ -156,6 +158,7 @@ class TestDependencyTrackPayload:
             project_name="test-product",
             project_version="1.0.0",
             parent_uuid="parent-uuid-123",
+            is_latest=True,
             bom="test-bom-data",
         )
 
@@ -166,5 +169,6 @@ class TestDependencyTrackPayload:
             "projectVersion": "1.0.0",
             "parentUUID": "parent-uuid-123",
             "autoCreate": True,
+            "isLatest": True,
             "bom": "test-bom-data",
         }
