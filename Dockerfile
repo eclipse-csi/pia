@@ -33,4 +33,4 @@ USER app
 
 EXPOSE 80
 
-ENTRYPOINT ["uvicorn", "pia.main:app", "--host", "0.0.0.0", "--port", "80"]
+ENTRYPOINT ["uvicorn", "pia.main:app", "--host", "0.0.0.0", "--port", "8000"]
