@@ -66,7 +66,7 @@ jobs:
       run: |
         docker run -d \
           --name pia-test \
-          -p 8000:80 \
+          -p 8000:8000 \
           -e PIA_DEPENDENCY_TRACK_API_KEY=test-key \
           -e PIA_projects_PATH=/app/projects.yaml \
           -v $PWD/projects.yaml.example:/app/projects.yaml:ro \
