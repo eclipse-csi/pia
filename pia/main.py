@@ -55,6 +55,12 @@ def _401(msg: str) -> NoReturn:
     )
 
 
+@app.get("/livez")
+async def livez():
+    """Kubernetes liveness probe."""
+    return {"status": "ok"}
+
+
 @app.post("/v1/upload/sbom", status_code=status.HTTP_200_OK)
 async def upload_sbom(
     payload: PiaUploadPayload,

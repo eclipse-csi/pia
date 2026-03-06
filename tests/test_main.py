@@ -228,3 +228,12 @@ class TestUploadSBOMEndpoint:
 
         assert response.status_code == 502
         assert b"Failed to upload to DependencyTrack" in response.content
+
+
+class TestHealthEndpoints:
+    """Tests for k8s health endpoints."""
+
+    def test_liveness(self, client):
+        response = client.get("/livez")
+        assert response.status_code == 200
+        assert response.json() == {"status": "ok"}
