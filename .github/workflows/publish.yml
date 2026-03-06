@@ -6,6 +6,8 @@ on:
       - 'v*'
   release:
     types: [published]
+    branches:
+      - main
   workflow_dispatch:
 
 env:
