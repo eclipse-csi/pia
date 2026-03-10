@@ -4,7 +4,7 @@ build-backend = "uv_build"
 
 [project]
 name = "pia"
-version = "0.2.0"
+version = "0.2.1"
 description = "Project Identity Authority - OIDC-based authentication broker for Eclipse Foundation projects"
 readme = "README.md"
 requires-python = ">=3.13.2"
