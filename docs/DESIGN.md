@@ -52,7 +52,7 @@ sequenceDiagram
     IdP->>PIA: 7. Return JWKs
     PIA->>PIA: 8. Authenticate
     Note over PIA: - Verify token<br/>- Match claims with projects settings
-    PIA->>dp: 9. Post SBOM
+    PIA->>dp: 9. Upload SBOM
     dp-->>PIA: Success
     PIA-->>Publisher: Success
 ```
@@ -128,7 +128,7 @@ sequenceDiagram
 
    - see 3.1.1. Token Verification and Authentication Flow
 
-5. **SBOM Publishing**: PIA sends POST request to DependencyTrack:
+5. **SBOM Publishing**: PIA sends upload request to DependencyTrack:
 
    - `Content-Type`: `application/json`
    - `X-Api-Key`: Use internally stored, DependencyTrack access token
@@ -194,7 +194,7 @@ Content-Type: application/json
   - Issuer not allowed
   - No matching project found for token claims
 - `422 Unprocessable Entity`: Missing Authorization header or invalid JSON
-- `502`: DependencyTrack post request failed
+- `502`: DependencyTrack upload request failed
 - `*`: Relay DependencyTrack status code
 
 
