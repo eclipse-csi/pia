@@ -23,7 +23,7 @@ def upload_sbom(
     }
 
     try:
-        response = requests.post(
+        response = requests.put(
             url,
             json=payload.to_dict(),
             headers=headers,

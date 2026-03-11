@@ -25,17 +25,17 @@ def dt_payload():
 
 
 class TestUploadSBOM:
-    @patch("pia.dependencytrack.requests.post")
-    def test_upload(self, mock_post, dt_payload):
+    @patch("pia.dependencytrack.requests.put")
+    def test_upload(self, mock_put, dt_payload):
         """Test request and response."""
-        mock_post.return_value = "mock_response"
+        mock_put.return_value = "mock_response"
         result = upload_sbom(TEST_URL, TEST_API_KEY, dt_payload)
 
         # Assert result is request response
         assert result == "mock_response"
 
         # Assert request was made correctly
-        mock_post.assert_called_once_with(
+        mock_put.assert_called_once_with(
             "https://dt.example.com/api/v1/bom",
             json={
                 "projectName": "test-product",
@@ -51,10 +51,10 @@ class TestUploadSBOM:
             },
         )
 
-    @patch("pia.dependencytrack.requests.post")
-    def test_upload_request_exception(self, mock_post, dt_payload):
+    @patch("pia.dependencytrack.requests.put")
+    def test_upload_request_exception(self, mock_put, dt_payload):
         """Test error handling."""
-        mock_post.side_effect = requests.RequestException()
+        mock_put.side_effect = requests.RequestException()
 
         with pytest.raises(
             DependencyTrackError, match="Failed to upload SBOM to DependencyTrack"
