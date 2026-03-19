@@ -1,6 +1,6 @@
 """Tests for dependencytrack module."""
 
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 import requests
@@ -28,11 +28,13 @@ class TestUploadSBOM:
     @patch("pia.dependencytrack.requests.put")
     def test_upload(self, mock_put, dt_payload):
         """Test request and response."""
-        mock_put.return_value = "mock_response"
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_put.return_value = mock_response
         result = upload_sbom(TEST_URL, TEST_API_KEY, dt_payload)
 
         # Assert result is request response
-        assert result == "mock_response"
+        assert result == mock_response
 
         # Assert request was made correctly
         mock_put.assert_called_once_with(
