@@ -63,7 +63,7 @@ class TestVerifyToken:
                 verify_exp=True,
                 verify_aud=True,
                 verify_iat=True,
-                require={"aud", "exp", "iat"},
+                require=["aud", "exp", "iat"],
             ),
         )
 
