@@ -33,7 +33,6 @@ logger.info("PIA application settings loaded successfully")
 @asynccontextmanager
 async def load_project_settings_on_startup(app: FastAPI):
     app.state.projects = Projects.from_yaml_file(settings.projects_path)
-    logger.info(f"Loaded projects from {settings.projects_path}")
     yield
 
 
@@ -76,10 +75,14 @@ async def upload_sbom(
     # Handle Auth Header
     projects: Projects = request.app.state.projects
 
+    logger.info("Received SBOM upload request")
+
     # Extract Bearer token from Authorization header
     if not authorization.startswith("Bearer "):
         _401("Invalid Authorization header format")
     token = authorization[7:]  # Remove "Bearer " prefix
+
+    logger.info("Bearer token extracted from Authorization header")
 
     # Extract issuer from unverified token
     try:
@@ -92,16 +95,25 @@ async def upload_sbom(
         logger.warning(f"Token decode failed: {e}")
         _401("Invalid token")
 
+    logger.info(f"Unverified issuer extracted: {unverified_issuer}")
+
     # Check if issuer exists in any project configuration to fail early
     #
     # NOTE: This is an expensive operation (iterates over all projects) for a
     # completely unauthenticated request. Consider to ...
     # - make less expensive (optimize with db), or
     # - match against issuer constants (full for GitHub, prefix-only for Jenkins)
+    logger.info(
+        f"Checking if issuer '{unverified_issuer}' is allowed "
+        f"across {len(projects.root)} project(s)"
+    )
     if not projects.has_issuer(unverified_issuer):
         logger.warning(f"Issuer {unverified_issuer} not allowed")
         _401("Issuer not allowed")
 
+    logger.info(
+        f"Issuer '{unverified_issuer}' is allowed, proceeding with token verification"
+    )
     # Full token verification
     try:
         verified_claims = oidc.verify_token(
@@ -112,6 +124,8 @@ async def upload_sbom(
     except oidc.TokenVerificationError as e:
         logger.warning(f"Token verification failed: {e}")
         _401("Token verification failed")
+
+    logger.info("Token signature verified successfully")
 
     # Find project by matching verified token claims
     # NOTE: Returns first match
@@ -128,6 +142,11 @@ async def upload_sbom(
     # ==========================================================================
     # Handle Payload
 
+    logger.info(
+        f"Preparing DependencyTrack payload for {payload.product_name} "
+        f"{payload.product_version}"
+    )
+
     # Create DependencyTrack payload
     dt_payload = DependencyTrackUploadPayload(
         project_name=payload.product_name,
@@ -143,10 +162,6 @@ async def upload_sbom(
             str(settings.dependency_track_url),
             settings.dependency_track_api_key,
             dt_payload,
-        )
-        logger.info(
-            f"Uploaded SBOM for {project.project_id}/{payload.product_name} "
-            f"to DependencyTrack (status: {dt_response.status_code})"
         )
 
         # Relay DependencyTrack response

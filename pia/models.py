@@ -1,9 +1,12 @@
 """Data models with validation and authentication logic."""
 
+import logging
 from typing import Annotated, Any
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, HttpUrl, RootModel, UrlConstraints
+
+logger = logging.getLogger(__name__)
 
 # `preserve_empty_path=True` tells pydantic to not add any trailing slashes,
 # to avoid surprising results in `Project.match_issuer`.
@@ -61,7 +64,8 @@ class Projects(RootModel):
 
     def has_issuer(self, issuer: str) -> bool:
         """Check if any project has the given issuer."""
-        return any(project.match_issuer(issuer) for project in self.root)
+        found = any(project.match_issuer(issuer) for project in self.root)
+        return found
 
     def find_project_by_claims(self, token_claims: dict[str, Any]) -> Project | None:
         """Find project by matching verified token claims.
@@ -70,9 +74,26 @@ class Projects(RootModel):
         A project matches if issuer matches AND all required_claims match.
         """
         issuer = token_claims["iss"]
+        logger.info(
+            f"Searching for project matching issuer '{issuer}' and token claims"
+        )
         for project in self.root:
-            if project.match_issuer(issuer) and project.match_claims(token_claims):
-                return project
+            if not project.match_issuer(issuer):
+                logger.info(
+                    f"Project '{project.project_id}': issuer mismatch, skipping"
+                )
+                continue
+            if not project.match_claims(token_claims):
+                logger.info(
+                    f"Project '{project.project_id}': issuer matches"
+                    " but claims mismatch, skipping"
+                )
+                continue
+            logger.info(
+                f"Project '{project.project_id}': issuer and claims match, "
+                f"claims are: {project.required_claims}"
+            )
+            return project
         return None
 
     @classmethod
@@ -81,7 +102,9 @@ class Projects(RootModel):
         with open(path) as f:
             config = yaml.safe_load(f)
 
-        return cls.model_validate(config)
+        projects = cls.model_validate(config)
+        logger.info(f"Loaded {len(projects.root)} project(s) from {path}")
+        return projects
 
 
 class PiaUploadPayload(BaseModel):

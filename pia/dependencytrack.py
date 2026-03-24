@@ -1,8 +1,12 @@
 """DependencyTrack API client."""
 
+import logging
+
 import requests
 
 from .models import DependencyTrackUploadPayload
+
+logger = logging.getLogger(__name__)
 
 
 class DependencyTrackError(Exception):
@@ -23,11 +27,13 @@ def upload_sbom(
     }
 
     try:
+        logger.info(f"Uploading SBOM to DependencyTrack at {url}")
         response = requests.put(
             url,
             json=payload.to_dict(),
             headers=headers,
         )
+        logger.info(f"DependencyTrack responded with status {response.status_code}")
         return response
 
     except requests.RequestException as e:
