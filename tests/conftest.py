@@ -3,6 +3,8 @@
 import pytest
 import yaml
 
+from pia.models import Projects
+
 
 @pytest.fixture
 def test_projects():
@@ -27,3 +29,9 @@ def test_projects_file(tmp_path, test_projects):
     with open(projects_path, "w") as f:
         yaml.dump(test_projects, f)
     return projects_path
+
+
+@pytest.fixture
+def projects(test_projects):
+    """Projects instance built from test_projects, for direct calls."""
+    return Projects(test_projects)
