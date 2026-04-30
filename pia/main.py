@@ -5,13 +5,14 @@ from contextlib import asynccontextmanager
 from typing import Annotated, NoReturn
 
 import jwt
-from fastapi import FastAPI, Header, HTTPException, Request, Response, status
+from fastapi import Depends, FastAPI, Header, HTTPException, Request, Response, status
 
 from . import __version__, dependencytrack, oidc
 from .config import Settings
 from .models import (
     DependencyTrackUploadPayload,
     PiaUploadPayload,
+    Project,
     Projects,
 )
 
@@ -54,27 +55,20 @@ def _401(msg: str) -> NoReturn:
     )
 
 
-@app.get("/livez")
-async def livez():
-    """Kubernetes liveness probe."""
-    return {"status": "ok"}
+def get_projects(request: Request) -> Projects:
+    """Dependency providing the loaded Projects from app state."""
+    return request.app.state.projects
 
 
-@app.post("/v1/upload/sbom", status_code=status.HTTP_200_OK)
-async def upload_sbom(
-    payload: PiaUploadPayload,
-    request: Request,
+async def authenticate(
     authorization: Annotated[str, Header()],
-):
-    """Handle SBOM upload with OIDC authentication.
+    projects: Annotated[Projects, Depends(get_projects)],
+) -> Project:
+    """Authenticate request via OIDC Bearer token.
 
     Implements authentication flow from DESIGN.md section 3.1.1.
     Token must be provided as Bearer token in Authorization header (RFC6750).
     """
-    # ==========================================================================
-    # Handle Auth Header
-    projects: Projects = request.app.state.projects
-
     logger.info("Received SBOM upload request")
 
     # Extract Bearer token from Authorization header
@@ -139,9 +133,21 @@ async def upload_sbom(
         f"with issuer {verified_claims['iss']}"
     )
 
-    # ==========================================================================
-    # Handle Payload
+    return project
 
+
+@app.get("/livez")
+async def livez():
+    """Kubernetes liveness probe."""
+    return {"status": "ok"}
+
+
+@app.post("/v1/upload/sbom", status_code=status.HTTP_200_OK)
+async def upload_sbom(
+    payload: PiaUploadPayload,
+    project: Annotated[Project, Depends(authenticate)],
+):
+    """Handle SBOM upload."""
     logger.info(
         f"Preparing DependencyTrack payload for {payload.product_name} "
         f"{payload.product_version}"

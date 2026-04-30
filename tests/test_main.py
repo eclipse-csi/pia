@@ -7,6 +7,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from pia.dependencytrack import DependencyTrackError
+from pia.models import Project
 from pia.oidc import TokenVerificationError
 
 
@@ -45,6 +46,23 @@ def valid_request_data():
 def auth_header():
     """Valid Authorization header with Bearer token."""
     return {"Authorization": "Bearer eyJhbGciOiJSUzI1NiJ9.test.token"}
+
+
+@pytest.fixture
+def authenticate_as_project():
+    """Skips authentication and returns a mock authenticated project."""
+    from pia.main import app, authenticate
+
+    mock_project = Project(
+        project_id="github-project",
+        issuer="https://token.actions.githubusercontent.com",
+        dt_parent_uuid="uuid-1",
+        required_claims={"repository": "eclipse-test/repo"},
+    )
+
+    app.dependency_overrides[authenticate] = lambda: mock_project
+    yield
+    app.dependency_overrides.clear()
 
 
 class TestUploadSBOMEndpoint:
@@ -101,7 +119,9 @@ class TestUploadSBOMEndpoint:
         assert response.status_code == 422
         assert b"JSON" in response.content or b"json" in response.content
 
-    def test_upload_missing_field(self, client, valid_request_data, auth_header):
+    def test_upload_missing_field(
+        self, client, valid_request_data, auth_header, authenticate_as_project
+    ):
         """Test error with missing required field."""
         del valid_request_data["product_name"]
 
