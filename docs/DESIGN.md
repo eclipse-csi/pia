@@ -51,7 +51,7 @@ sequenceDiagram
     PIA->>IdP: 6. Request JWKs
     IdP->>PIA: 7. Return JWKs
     PIA->>PIA: 8. Authenticate
-    Note over PIA: - Verify token<br/>- Match claims with projects settings
+    Note over PIA: - Verify token<br/>- Match claims with projects database
     PIA->>dp: 9. Upload SBOM
     dp-->>PIA: Success
     PIA-->>Publisher: Success
@@ -72,7 +72,7 @@ sequenceDiagram
 #### PIA
 - Provides REST API for SBOM upload
 - Verifies identity tokens using OIDC discovery protocol
-- Authenticates SBOM based on OIDC claims and internal projects settings
+- Authenticates SBOM based on OIDC claims and internal projects database
 - Publishes SBOM to DependencyTrack on behalf of authenticated projects
 
 #### DependencyTrack
@@ -85,7 +85,7 @@ sequenceDiagram
      Identity Provider (managed by GitHub)
    - Each Jenkins Publisher has its own Identity Provider running on the same
      Jenkins instance (managed by Eclipse Foundation)
-2. **PIA** trusts **Identity Provider** because PIA has projects settings for
+2. **PIA** trusts **Identity Provider** because PIA has a projects database for
    Identity Provider (issuer) URLs (managed by Eclipse Foundation)
 3. **DependencyTrack** trusts **PIA** because PIA has an auth token for
    the DependencyTrack API (managed by Eclipse Foundation)
@@ -106,8 +106,9 @@ sequenceDiagram
    - `iat`: Issued At timestamp
    - `aud`: Audience (must match PIA's expected audience)
    - Platform-specific:
-     - GitHub: `repository` identifies project via repository owner and name
-     - Jenkins: `iss` also identifies project via URL path
+     - GitHub: `repository`, `repository_owner`, `repository_owner_id` identify
+       the publishing repository
+     - Jenkins: `iss` identifies the project via URL path
 
 3. **Publish Request**: Publisher sends POST request to PIA:
 
@@ -128,13 +129,18 @@ sequenceDiagram
 
    - see 3.1.1. Token Verification and Authentication Flow
 
-5. **SBOM Publishing**: PIA sends upload request to DependencyTrack:
+5. **DependencyTrack Project Resolution**: PIA looks up the DependencyTrack
+   project by matching `name` with `product_name` from the POST data, where the
+   DependencyTrack project shares the same `ef_project_id` as the authenticated
+   workload. This provides the `dt_parent_uuid` for the DependencyTrack upload.
+
+6. **SBOM Publishing**: PIA sends upload request to DependencyTrack:
 
    - `Content-Type`: `application/json`
-   - `X-Api-Key`: Use internally stored, DependencyTrack access token
+   - `X-Api-Key`: Use internally stored DependencyTrack access token
    - `projectName`: Use `product_name` from POST data
    - `projectVersion`: Use `product_version` from POST data.
-   - `parentUUID`: Look up internally
+   - `parentUUID`: Use `parent_uuid` from matched DependencyTrack project
    - `autoCreate`: `true` (creates new subcategory for new `projectName`)
    - `isLatest`: Use `is_latest` from POST data
    - `bom`: Use `bom` from POST data
@@ -147,6 +153,8 @@ sequenceDiagram
    1. Decode token without any verification
    2. Extract issuer
    3. Verify issuer is known
+      - GitHub: Full match: `https://token.actions.githubusercontent.com`
+      - Jenkins: Prefix match: `https://ci.eclipse.org`
 3. Token Key Discovery
    1. Fetch OIDC configuration from `{issuer}/.well-known/openid-configuration`
    2. Extract `jwks_uri` from configuration
@@ -157,9 +165,11 @@ sequenceDiagram
    2. Verify token issued at time and expiry
    3. Verify audience matches expected value
    4. Verify signature using RSA256
-5. Project Authorization
-   1. Match verified token claims (issuer + required_claims) against all project
-      configurations to find the authorized project
+5. Workload Matching
+   1. Find workload type by issuer
+   2. Find workload by matching verified token claims against workload database:
+      - GitHub: match `repo_owner`, `repo_name`, `repo_owner_id`
+      - Jenkins: match `issuer`
 
 ## 4. API Design
 
@@ -192,7 +202,8 @@ Content-Type: application/json
   - Expired token
   - Token verification error
   - Issuer not allowed
-  - No matching project found for token claims
+  - No matching workload found for token claims
+  - No matching DependencyTrack project found
 - `422 Unprocessable Entity`: Missing Authorization header or invalid JSON
 - `502`: DependencyTrack upload request failed
 - `*`: Relay DependencyTrack status code
@@ -204,24 +215,71 @@ PIA requires settings for:
 
 1. **Application**: Loaded from environment variables with `PIA_` prefix:
     - `PIA_DEPENDENCY_TRACK_API_KEY`: DependencyTrack API key (required)
-    - `PIA_PROJECTS_PATH`: Path to projects.yaml file (required)
+    - `PIA_DATABASE_URL`: PostgreSQL connection string (required)
     - `PIA_DEPENDENCY_TRACK_URL`: DependencyTrack SBOM upload URL
       (default: `https://sbom.eclipse.org/api/v1/bom`)
     - `PIA_EXPECTED_AUDIENCE`: Expected audience for OIDC tokens
       (default: `pia.eclipse.org`)
 
-2. **Projects**: YAML file (e.g. `projects.yaml`) containing a list of project
-    configurations with allowed issuer, required claims, and DependencyTrack
-    project UUID. Schema:
-    ```yaml
-    - project_id: <project_id>
-      issuer: <issuer_url>
-      dt_parent_uuid: <uuid>  # DependencyTrack project UUID
-      required_claims:        # Omit for Jenkins (issuer is enough)
-        <claim_name>: <expected_value>
-    ```
-    NOTE: Initial implementation uses static YAML; designed for future database
-    migration.
+2. **Database**: PostgreSQL database storing Eclipse Foundation projects,
+    workloads, and DependencyTrack projects. See section 4.3 for the data model.
+
+
+### 4.3 Data Model
+
+#### EclipseFoundationProject
+An Eclipse Foundation project. Groups workloads and DependencyTrack projects.
+Uses the Eclipse project identifier directly as primary key. Foreign keys
+referencing this table use `ON UPDATE CASCADE` to propagate project ID changes.
+
+| Column | Type | Notes |
+|--------|------|-------|
+| `id` | String PK | Eclipse project identifier (e.g. `technology.foo`) |
+
+#### Workload (base, polymorphic)
+A CI/CD entity that can upload SBOMs. Uses joined-table inheritance with a
+`type` discriminator column.
+
+| Column | Type | Notes |
+|--------|------|-------|
+| `id` | Serial PK | |
+| `ef_project_id` | FK → eclipse_foundation_projects.id | |
+| `type` | String | Discriminator: `github` or `jenkins` |
+
+#### GitHubWorkload (extends Workload)
+Issuer is always `https://token.actions.githubusercontent.com` (constant, not
+stored).
+
+| Column | Type | Notes |
+|--------|------|-------|
+| `id` | FK → workloads.id | |
+| `repo_name` | String | Repository name (e.g. `my-repo`) |
+| `repo_owner` | String | Repository owner (e.g. `eclipse-foo`) |
+| `repo_owner_id` | String | GitHub numeric owner ID |
+
+#### JenkinsWorkload (extends Workload)
+Each Jenkins workload has a distinct issuer URL.
+
+| Column | Type | Notes |
+|--------|------|-------|
+| `id` | FK → workloads.id | |
+| `issuer` | String | OIDC issuer URL (e.g. `https://ci.eclipse.org/<name>/oidc`) |
+
+#### DependencyTrackProject
+A DependencyTrack target for SBOM uploads.
+
+| Column | Type | Notes |
+|--------|------|-------|
+| `id` | Serial PK | |
+| `ef_project_id` | FK → eclipse_foundation_projects.id | |
+| `name` | String | DependencyTrack project name (matched against `product_name` in upload payload) |
+| `parent_uuid` | String | DependencyTrack parent project UUID |
+
+#### Authorization Boundary
+
+The Eclipse Foundation project id is the authorization boundary. Any workload
+can upload SBOMs for any DependencyTrack project that shares the same Eclipse
+Foundation project id.
 
 
 ## 5. Implementation Details
@@ -229,6 +287,7 @@ PIA requires settings for:
 ### 5.1 Technology Stack
 
 - **Web Framework**: FastAPI (modern, has built-in model validation and API documentation)
+- **Database**: PostgreSQL with SQLAlchemy ORM, `psycopg2`, and Alembic for schema migrations
 - **HTTP Client**: `requests` for OIDC discovery and DependencyTrack API calls
 - **JWT Library**: `PyJWT` with `cryptography` support
   - Handles token parsing, validation, and signature verification
@@ -240,16 +299,17 @@ PIA requires settings for:
 ### 5.2 Core Modules
 
 - `main.py`: FastAPI app with:
-  - Settings management for application and project settings
+  - Application settings management
   - Upload SBOM API endpoint implementing full authentication and
-    DependencyTrack upload flow (section 3.1, items 4. and 5.)
+    DependencyTrack upload flow (section 3.1, items 4. through 6.)
+- `models.py`: Data models:
+  - SQLAlchemy declarative `Base`
+  - SQLAlchemy ORM models: `EclipseFoundationProject`, `Workload`,
+    `GitHubWorkload`, `JenkinsWorkload`, `DependencyTrackProject`
+    (see section 4.3)
+  - Pydantic request models: `PiaUploadPayload`, `DependencyTrackUploadPayload`
 - `oidc.py`: OIDC token validation and signature verification using PyJWT
 - `dependencytrack.py`: DependencyTrack API upload client for SBOMs
-- `models.py`: Pydantic data models with validation and authentication:
-  - `Project`: Project settings instance
-  - `Projects`: List of Project instances
-  - `PiaUploadPayload`: Request model for PIA Upload SBOM API endpoint
-  - `DependencyTrackUploadPayload`: Request model for DependencyTrack API
 
 ### 5.3 Error Handling
 
@@ -257,8 +317,9 @@ PIA requires settings for:
 
 - **Authentication Errors**:
   - 422 for malformed POST data
-  - 401 for unknown issuer, token verification errors, or no matching project
-    found for verified token claims
+  - 401 for unknown issuer, token verification errors, no matching workload
+    found for verified token claims, or no matching DependencyTrack project
+    for the workload's `ef_project_id`
 
 - **DependencyTrack Upload Errors**: 502, if upload fails with an error, or HTTP
     status code from DependencyTrack
@@ -296,7 +357,7 @@ Metrics to track:
 | Token replay | Short-lived tokens (5-10 min), do not re-use token  (future work) |
 | Issuer spoofing | HTTPS-only issuer URLs, strict URL validation |
 | Token forgery | Cryptographic signature verification |
-| Project impersonation | Claim-to-project validation |
+| Project impersonation | Claim-to-workload validation, project-scoped DependencyTrack project resolution |
 | DoS via OIDC discovery | Cache OIDC discovery, rate limit requests (both future work) |
 | Parsing vulnerabilities | Use minimal schema for unauthenticated POST data, use well-tested JWT library for token parsing |
 
@@ -321,9 +382,10 @@ Metrics to track:
 - Issuer: `https://token.actions.githubusercontent.com`
 - OIDC config path: `/.well-known/openid-configuration`
 
-**Required Claims**:
-- `repository`: identifies Eclipse project (e.g. `eclipse-foo/bar` identifies
-  project Eclipse Foo)
+**Verified Claims**:
+- `repository_owner`: GitHub organization or user name (e.g. `eclipse-foo`)
+- `repository_owner_id`: GitHub numeric owner ID
+- `repository`: `{owner}/{repo_name}`, used to extract `repo_name`
 
 **Example Publisher workflow**:
 ```yaml
@@ -355,9 +417,10 @@ jobs:
 - Issuer: `https://ci.eclipse.org/<PROJECT NAME>/oidc`
 - OIDC config path: `/.well-known/openid-configuration`
 
-**Required Claims**:
-- The issuer also identifies the project (e.g.
-  `https://ci.eclipse.org/eclipse-baz/oidc` identifies project Eclipse Baz)
+**Verified Claims**:
+- `iss`: The issuer URL identifies the project (e.g.
+  `https://ci.eclipse.org/eclipse-baz/oidc` identifies project Eclipse Baz).
+  No additional claims required.
 
 **Publisher Setup**:
 - Install plugins: `oidc-provider`, `credentials-binding`
@@ -412,26 +475,13 @@ pipeline {
 ### 8.2 Settings
 
 Settings via:
-1. YAML file (`projects.yaml`) for project/issuer settings
+1. PostgreSQL database for Eclipse Foundation projects, workloads, and DependencyTrack projects (see section 4.3)
 2. Environment variables (with `PIA_` prefix) for application settings
-
-Example `projects.yaml`:
-```yaml
-- project_id: my-github-project
-  issuer: "https://token.actions.githubusercontent.com"
-  dt_parent_uuid: "12345678-1234-1234-1234-123456789abc"
-  required_claims:
-    repository: "eclipse-foo/my-github-project"
-
-- project_id: my-jenkins-project
-  issuer: "https://ci.eclipse.org/my-jenkins-project/oidc"
-  dt_parent_uuid: "87654321-4321-4321-4321-cba987654321"
-```
 
 Required environment variables:
 ```bash
 PIA_DEPENDENCY_TRACK_API_KEY=<your-api-key>
-PIA_PROJECTS_PATH=/path/to/projects.yaml
+PIA_DATABASE_URL=postgresql://user:pass@host:5432/pia
 PIA_DEPENDENCY_TRACK_URL=https://sbom.eclipse.org/api/v1/bom  # optional, has default
 PIA_EXPECTED_AUDIENCE=pia.eclipse.org  # optional, has default
 ```
@@ -457,7 +507,6 @@ PIA_EXPECTED_AUDIENCE=pia.eclipse.org  # optional, has default
 
 ## 10. Future Work
 
-- Replace yaml-based projects settings with database
 - Add caching for oidc config and jwks
 - Add monitoring
 - Make upload API async, if sync takes too long
