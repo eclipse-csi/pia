@@ -383,9 +383,8 @@ Metrics to track:
 - OIDC config path: `/.well-known/openid-configuration`
 
 **Verified Claims**:
-- `repository_owner`: GitHub organization or user name (e.g. `eclipse-foo`)
 - `repository_owner_id`: GitHub numeric owner ID
-- `repository`: `{owner}/{repo_name}`, used to extract `repo_name`
+- `repository`: In the form `{repo_owner}/{repo_name}`
 
 **Example Publisher workflow**:
 ```yaml
