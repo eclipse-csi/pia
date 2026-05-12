@@ -5,109 +5,109 @@ from pydantic import ValidationError
 
 from pia.models import (
     DependencyTrackUploadPayload,
+    GitHubWorkload,
+    JenkinsWorkload,
     PiaUploadPayload,
-    Project,
-    Projects,
+    find_dt_project,
+    find_workload_by_claims,
+    is_issuer_known,
 )
 
-
-class TestProject:
-    @pytest.fixture
-    def github(self, test_projects):
-        return Project(**test_projects[0])
-
-    @pytest.fixture
-    def jenkins(self, test_projects):
-        return Project(**test_projects[1])
-
-    def test_match_issuer(self, github):
-        assert github.match_issuer("https://token.actions.githubusercontent.com")
-        assert not github.match_issuer("https://githubusercontent.com")
-        assert not github.match_issuer("https://token.actions.githubusercontent.com/")
-
-    def test_match_claims(self, github, jenkins):
-        assert github.match_claims({"repository": "eclipse-test/repo"})
-        assert github.match_claims({"repository": "eclipse-test/repo", "a": "b"})
-        assert not github.match_claims({"repo": "eclipse-test/repo"})
-        assert not github.match_claims({"repository": "repo"})
-        assert jenkins.match_claims({})
-        assert jenkins.match_claims({"c": "d"})
+GITHUB_ISSUER = "https://token.actions.githubusercontent.com"
 
 
-class TestProjects:
-    def test_load_yaml_file(self, test_projects_file, test_projects):
-        projects = Projects.from_yaml_file(test_projects_file)
-        assert projects == Projects(test_projects)
+class TestIsIssuerKnown:
+    def test_github_issuer_known(self):
+        assert is_issuer_known(GITHUB_ISSUER)
 
-    def test_has_issuer(self, test_projects):
-        """Test checking if issuer exists in any project."""
-        projects = Projects(test_projects)
+    def test_jenkins_issuer_known(self):
+        assert is_issuer_known("https://ci.eclipse.org/eclipse-other/oidc")
 
-        assert projects.has_issuer("https://token.actions.githubusercontent.com")
-        assert projects.has_issuer("https://ci.eclipse.org/test/oidc")
-        assert not projects.has_issuer("https://unknown-issuer.com")
+    def test_arbitrary_issuer_unknown(self):
+        assert not is_issuer_known("https://attacker.com")
 
-    def test_find_project_by_claims_github(self, test_projects):
-        """Test finding GitHub project by matching claims."""
-        projects = Projects(test_projects)
 
-        # Matching claims
-        project = projects.find_project_by_claims(
+class TestFindWorkloadByClaims:
+    def test_github_match(self, seed_db):
+        workload = find_workload_by_claims(
+            seed_db,
             {
-                "iss": "https://token.actions.githubusercontent.com",
+                "iss": GITHUB_ISSUER,
                 "repository": "eclipse-test/repo",
-            }
+                "repository_owner_id": "42",
+            },
         )
-        assert project is not None
-        assert project.project_id == "github-project"
+        assert isinstance(workload, GitHubWorkload)
+        assert workload.ef_project_id == "eclipse-test"
 
-        # Wrong repository claim
-        project = projects.find_project_by_claims(
+    def test_github_wrong_repo(self, seed_db):
+        workload = find_workload_by_claims(
+            seed_db,
             {
-                "iss": "https://token.actions.githubusercontent.com",
-                "repository": "wrong/repo",
-            }
+                "iss": GITHUB_ISSUER,
+                "repository": "eclipse-test/wrong-repo",
+                "repository_owner_id": "42",
+            },
         )
-        assert project is None
+        assert workload is None
 
-        # Missing repository claim
-        project = projects.find_project_by_claims(
+    def test_github_wrong_owner_id(self, seed_db):
+        workload = find_workload_by_claims(
+            seed_db,
             {
-                "iss": "https://token.actions.githubusercontent.com",
-            }
-        )
-        assert project is None
-
-    def test_find_project_by_claims_jenkins(self, test_projects):
-        """Test finding Jenkins project by matching claims (issuer only)."""
-        projects = Projects(test_projects)
-
-        # Jenkins project has no required claims, only issuer match needed
-        project = projects.find_project_by_claims(
-            {
-                "iss": "https://ci.eclipse.org/test/oidc",
-            }
-        )
-        assert project is not None
-        assert project.project_id == "jenkins-project"
-
-    def test_find_project_by_claims_unknown_issuer(self, test_projects):
-        """Test no match when issuer is unknown."""
-        projects = Projects(test_projects)
-
-        project = projects.find_project_by_claims(
-            {
-                "iss": "https://unknown-issuer.com",
+                "iss": GITHUB_ISSUER,
                 "repository": "eclipse-test/repo",
-            }
+                "repository_owner_id": "999",
+            },
         )
-        assert project is None
+        assert workload is None
+
+    def test_github_malformed_repository_claim(self, seed_db):
+        workload = find_workload_by_claims(
+            seed_db,
+            {"iss": GITHUB_ISSUER, "repository": "no-slash"},
+        )
+        assert workload is None
+
+    def test_github_missing_repository_claim(self, seed_db):
+        workload = find_workload_by_claims(seed_db, {"iss": GITHUB_ISSUER})
+        assert workload is None
+
+    def test_jenkins_match(self, seed_db):
+        workload = find_workload_by_claims(
+            seed_db,
+            {"iss": "https://ci.eclipse.org/eclipse-other/oidc"},
+        )
+        assert isinstance(workload, JenkinsWorkload)
+        assert workload.ef_project_id == "eclipse-other"
+
+    def test_jenkins_no_match(self, seed_db):
+        workload = find_workload_by_claims(
+            seed_db,
+            {"iss": "https://ci.eclipse.org/no-such-project/oidc"},
+        )
+        assert workload is None
+
+
+class TestFindDtProject:
+    def test_match(self, seed_db):
+        dt_project = find_dt_project(seed_db, "eclipse-test", "test-product")
+        assert dt_project is not None
+        assert dt_project.parent_uuid == "uuid-1"
+
+    def test_wrong_project(self, seed_db):
+        # 'test-product' exists for eclipse-test, but not for eclipse-other
+        dt_project = find_dt_project(seed_db, "eclipse-other", "test-product")
+        assert dt_project is None
+
+    def test_wrong_name(self, seed_db):
+        dt_project = find_dt_project(seed_db, "eclipse-test", "no-such-product")
+        assert dt_project is None
 
 
 class TestUploadSBOMPayload:
     @pytest.fixture
     def valid_request_data(self):
-        """Valid request data."""
         return {
             "product_name": "test-product",
             "product_version": "1.0.0",
@@ -115,9 +115,7 @@ class TestUploadSBOMPayload:
         }
 
     def test_valid(self, valid_request_data):
-        """Test creating UploadSBOMPayload from valid data."""
         payload = PiaUploadPayload(**valid_request_data)
-
         assert payload.product_name == "test-product"
         assert payload.product_version == "1.0.0"
         assert payload.bom == "valid_bom"
@@ -128,9 +126,7 @@ class TestUploadSBOMPayload:
 
     @pytest.mark.parametrize("field", ["product_name", "product_version", "bom"])
     def test_missing_required_field(self, valid_request_data, field):
-        """Test error when a required field is missing."""
         del valid_request_data[field]
-
         with pytest.raises(ValidationError):
             PiaUploadPayload(**valid_request_data)
 
@@ -144,16 +140,13 @@ class TestUploadSBOMPayload:
         ],
     )
     def test_wrong_type(self, valid_request_data, field, value):
-        """Test error when a field has the wrong type."""
         valid_request_data[field] = value
-
         with pytest.raises(ValidationError):
             PiaUploadPayload(**valid_request_data)
 
 
 class TestDependencyTrackPayload:
     def test_to_dict(self):
-        """Test converting to dictionary with default auto_create."""
         dt_payload = DependencyTrackUploadPayload(
             project_name="test-product",
             project_version="1.0.0",
@@ -162,9 +155,7 @@ class TestDependencyTrackPayload:
             bom="test-bom-data",
         )
 
-        result = dt_payload.to_dict()
-
-        assert result == {
+        assert dt_payload.to_dict() == {
             "projectName": "test-product",
             "projectVersion": "1.0.0",
             "parentUUID": "parent-uuid-123",

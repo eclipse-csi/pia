@@ -15,9 +15,10 @@ class Settings(BaseSettings):
     DependencyTrack API Key
     https://docs.dependencytrack.org/integrations/rest-api/
     """
-    projects_path: str
+    database_url: str
     """
-    Path to projects.yaml
+    PostgreSQL connection string for the PIA database
+    e.g. postgresql://user:pass@host:5432/pia
     """
 
     expected_audience: str = "pia.eclipse.org"

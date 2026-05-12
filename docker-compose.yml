@@ -8,10 +8,9 @@ services:
       - "8000:8000"
     environment:
       - PIA_DEPENDENCY_TRACK_API_KEY=${PIA_DEPENDENCY_TRACK_API_KEY:-test-api-key}
-      - PIA_PROJECTS_PATH=/app/projects.yaml
+      - PIA_DATABASE_URL=${PIA_DATABASE_URL:-postgresql://dummy}
       - PIA_EXPECTED_AUDIENCE=${PIA_EXPECTED_AUDIENCE:-pia.eclipse.org}
       - PIA_DEPENDENCY_TRACK_URL=${PIA_DEPENDENCY_TRACK_URL:-https://sbom.eclipse.org/api/v1/bom}
     volumes:
       - ./pia:/app/pia:ro
-      - ./projects.yaml.example:/app/projects.yaml:ro
     entrypoint: ["uvicorn", "pia.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
