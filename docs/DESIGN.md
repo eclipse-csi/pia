@@ -196,6 +196,13 @@ Content-Type: application/json
 ```
 
 **Response:**
+- `200 OK`: SBOM accepted by DependencyTrack. Body provides the URL the
+  publisher should poll for processing status:
+  ```json
+  {
+    "polling_url": "https://sbom.eclipse.org/api/v1/bom/token/<token>"
+  }
+  ```
 - `401 Unauthorized`:
   - Invalid Authorization header format
   - Invalid token
@@ -206,7 +213,7 @@ Content-Type: application/json
   - No matching DependencyTrack project found
 - `422 Unprocessable Entity`: Missing Authorization header or invalid JSON
 - `502`: DependencyTrack upload request failed
-- `*`: Relay DependencyTrack status code
+- `*`: Relay DependencyTrack status code and body verbatim (non-2xx)
 
 
 ### 4.2 Settings
