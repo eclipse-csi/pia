@@ -136,10 +136,42 @@ class TestAuthenticate:
             "iss": GITHUB_ISSUER,
             "repository": "eclipse-test/repo",
             "repository_owner_id": "42",
+            "event_name": "push",
         }
         result = self._call(BEARER_TOKEN, seed_db)
         assert isinstance(result, Workload)
         assert result.ef_project_id == "eclipse-test"
+
+    @patch("pia.main.oidc.verify_token")
+    @patch("pia.main.jwt.decode")
+    def test_github_disallowed_event_name(self, mock_decode, mock_verify, seed_db):
+        """GitHub token with disallowed event_name is rejected."""
+        mock_decode.return_value = {"iss": GITHUB_ISSUER}
+        mock_verify.return_value = {
+            "iss": GITHUB_ISSUER,
+            "repository": "eclipse-test/repo",
+            "repository_owner_id": "42",
+            "event_name": "pull_request_target",
+        }
+        with pytest.raises(HTTPException) as exc:
+            self._call(BEARER_TOKEN, seed_db)
+        assert exc.value.status_code == 401
+        assert "Token claims rejected" in exc.value.detail
+
+    @patch("pia.main.oidc.verify_token")
+    @patch("pia.main.jwt.decode")
+    def test_github_missing_event_name(self, mock_decode, mock_verify, seed_db):
+        """GitHub token without an event_name claim is rejected."""
+        mock_decode.return_value = {"iss": GITHUB_ISSUER}
+        mock_verify.return_value = {
+            "iss": GITHUB_ISSUER,
+            "repository": "eclipse-test/repo",
+            "repository_owner_id": "42",
+        }
+        with pytest.raises(HTTPException) as exc:
+            self._call(BEARER_TOKEN, seed_db)
+        assert exc.value.status_code == 401
+        assert "Token claims rejected" in exc.value.detail
 
 
 class TestUploadSBOMEndpoint:
