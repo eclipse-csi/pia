@@ -11,6 +11,7 @@ from pia.models import (
     find_dt_project,
     find_workload_by_claims,
     is_issuer_known,
+    verify_workload_claims,
 )
 
 GITHUB_ISSUER = "https://token.actions.githubusercontent.com"
@@ -87,6 +88,48 @@ class TestFindWorkloadByClaims:
             {"iss": "https://ci.eclipse.org/no-such-project/oidc"},
         )
         assert workload is None
+
+
+class TestVerifyWorkloadClaims:
+    @pytest.fixture
+    def github_workload(self):
+        return GitHubWorkload(
+            ef_project_id="eclipse-test",
+            repo_owner="eclipse-test",
+            repo_name="repo",
+            repo_owner_id="42",
+        )
+
+    @pytest.fixture
+    def jenkins_workload(self):
+        return JenkinsWorkload(
+            ef_project_id="eclipse-other",
+            issuer="https://ci.eclipse.org/eclipse-other/oidc",
+        )
+
+    @pytest.mark.parametrize("event_name", ["push", "workflow_dispatch"])
+    def test_github_allowed_event(self, github_workload, event_name):
+        assert (
+            verify_workload_claims(github_workload, {"event_name": event_name}) is None
+        )
+
+    @pytest.mark.parametrize(
+        "event_name",
+        ["pull_request_target", "workflow_run", "issue_comment", "schedule", "release"],
+    )
+    def test_github_disallowed_event(self, github_workload, event_name):
+        reason = verify_workload_claims(github_workload, {"event_name": event_name})
+        assert reason is not None
+        assert event_name in reason
+
+    def test_github_missing_event(self, github_workload):
+        reason = verify_workload_claims(github_workload, {})
+        assert reason is not None
+        assert "None" in reason
+
+    def test_jenkins_not_checked(self, jenkins_workload):
+        # No event_name check for Jenkins; any claims dict passes.
+        assert verify_workload_claims(jenkins_workload, {}) is None
 
 
 class TestFindDtProject:

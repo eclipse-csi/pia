@@ -170,6 +170,11 @@ sequenceDiagram
    2. Find workload by matching verified token claims against workload database:
       - GitHub: match `repo_owner`, `repo_name`, `repo_owner_id`
       - Jenkins: match `issuer`
+6. Workload-Specific Claim Verification
+   - GitHub: `event_name` must be in the allowlist `{push, workflow_dispatch}`.
+     Excludes triggers that can be indirectly driven by non-maintainers
+     (`pull_request_target`, `workflow_run`, `issue_comment`, …).
+   - Jenkins: no additional checks.
 
 ## 4. API Design
 

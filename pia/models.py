@@ -16,6 +16,14 @@ GITHUB_ISSUER = "https://token.actions.githubusercontent.com"
 JENKINS_ISSUER_PREFIX = "https://ci.eclipse.org"
 """Prefix used for early validation of Jenkins issuer URLs."""
 
+GITHUB_ALLOWED_EVENT_NAMES = frozenset({"push", "workflow_dispatch"})
+"""Allowed values for the GitHub OIDC token's `event_name` claim.
+
+Restricts the OIDC mint to events that require write access to the repo
+(i.e. only maintainers can cause one). Excludes triggers like
+`pull_request_target`, `workflow_run`, and `issue_comment` that can be
+indirectly driven by non-maintainers. Relax on demand."""
+
 
 class Base(DeclarativeBase):
     """Declarative base class for al ORM models."""
@@ -161,6 +169,21 @@ def find_workload_by_claims(
     else:
         stmt = select(JenkinsWorkload).where(JenkinsWorkload.issuer == issuer)
     return session.execute(stmt).scalar_one_or_none()
+
+
+def verify_workload_claims(workload: Workload, claims: dict[str, Any]) -> str | None:
+    """Workload-type-specific claim verification beyond the workload-match step.
+
+    Returns a human-readable reason on rejection, or None on success.
+    """
+    if isinstance(workload, GitHubWorkload):
+        event_name = claims.get("event_name")
+        if event_name not in GITHUB_ALLOWED_EVENT_NAMES:
+            return (
+                f"GitHub event_name {event_name!r} not in allowlist "
+                f"{sorted(GITHUB_ALLOWED_EVENT_NAMES)}"
+            )
+    return None
 
 
 def find_dt_project(

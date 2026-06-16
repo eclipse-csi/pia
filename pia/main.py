@@ -19,6 +19,7 @@ from .models import (
     find_dt_project,
     find_workload_by_claims,
     is_issuer_known,
+    verify_workload_claims,
 )
 
 # Configure logging
@@ -134,6 +135,12 @@ async def authenticate(
             f"No matching workload found for token claims: {verified_claims}"
         )
         _401("No matching workload found for token claims")
+
+    # Workload-type-specific claim verification (e.g. GitHub event_name allowlist)
+    reason = verify_workload_claims(workload, verified_claims)
+    if reason:
+        logger.warning(f"Token claims rejected: {reason}")
+        _401("Token claims rejected")
 
     logger.info(
         f"Authenticated workload (project={workload.ef_project_id}, "
