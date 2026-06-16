@@ -3,7 +3,7 @@
 import logging
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, HttpUrl
 from sqlalchemy import ForeignKey, Select, String, UniqueConstraint, select
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column
 
@@ -197,6 +197,15 @@ class PiaUploadPayload(BaseModel):
     """
     Whether this SBOM should be marked as the latest version in DependencyTrack
     """
+
+    model_config = ConfigDict(use_attribute_docstrings=True)
+
+
+class PiaUploadResponse(BaseModel):
+    """Response for a successful PIA SBOM upload."""
+
+    polling_url: HttpUrl
+    """DependencyTrack URL to poll for processing status of this upload."""
 
     model_config = ConfigDict(use_attribute_docstrings=True)
 

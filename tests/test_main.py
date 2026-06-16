@@ -153,17 +153,67 @@ class TestUploadSBOMEndpoint:
         valid_request_data,
         authenticate_as_workload,
     ):
-        """Successful SBOM upload."""
+        """Successful SBOM upload returns DT polling URL."""
         mock_dt_response = Mock()
+        mock_dt_response.ok = True
         mock_dt_response.status_code = 200
-        mock_dt_response.content = b"content"
+        mock_dt_response.json.return_value = {"token": "dt-token-abc"}
         mock_upload.return_value = mock_dt_response
 
         response = client.post("/v1/upload/sbom", json=valid_request_data)
 
         assert response.status_code == 200
-        assert response.content == b"content"
-        assert response.headers["content-type"] == "application/json"
+        assert response.json() == {
+            "polling_url": "https://sbom.eclipse.org/api/v1/bom/token/dt-token-abc"
+        }
+
+    @patch("pia.main.dependencytrack.upload_sbom")
+    def test_upload_dt_malformed_success_body(
+        self,
+        mock_upload,
+        client,
+        valid_request_data,
+        authenticate_as_workload,
+        caplog,
+    ):
+        """A 2xx DT response without a 'token' field propagates an error.
+
+        TestClient re-raises server exceptions; in production FastAPI's ASGI
+        server converts them to 500. Either way the publisher does not get
+        a misleading 200.
+        """
+        mock_dt_response = Mock()
+        mock_dt_response.ok = True
+        mock_dt_response.status_code = 200
+        mock_dt_response.json.return_value = {"unexpected": "shape"}
+        mock_dt_response.text = '{"unexpected": "shape"}'
+        mock_upload.return_value = mock_dt_response
+
+        with pytest.raises(KeyError):
+            client.post("/v1/upload/sbom", json=valid_request_data)
+
+        assert "unparseable success response" in caplog.text
+        assert "unexpected" in caplog.text
+
+    @patch("pia.main.dependencytrack.upload_sbom")
+    def test_upload_dt_non_ok_relayed(
+        self,
+        mock_upload,
+        client,
+        valid_request_data,
+        authenticate_as_workload,
+    ):
+        """Non-2xx DT responses are relayed verbatim, not wrapped."""
+        mock_dt_response = Mock()
+        mock_dt_response.ok = False
+        mock_dt_response.status_code = 400
+        mock_dt_response.content = b'{"detail":"invalid bom"}'
+        mock_upload.return_value = mock_dt_response
+
+        response = client.post("/v1/upload/sbom", json=valid_request_data)
+
+        assert response.status_code == 400
+        assert response.content == b'{"detail":"invalid bom"}'
 
     def test_upload_invalid_json(self, client, authenticate_as_workload):
         """Error with invalid JSON."""

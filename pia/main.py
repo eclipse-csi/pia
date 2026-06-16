@@ -14,6 +14,7 @@ from .config import Settings
 from .models import (
     DependencyTrackUploadPayload,
     PiaUploadPayload,
+    PiaUploadResponse,
     Workload,
     find_dt_project,
     find_workload_by_claims,
@@ -185,14 +186,36 @@ async def upload_sbom(
             settings.dependency_track_api_key,
             dt_payload,
         )
-        return Response(
-            content=dt_response.content,
-            status_code=dt_response.status_code,
-            media_type="application/json",
-        )
     except dependencytrack.DependencyTrackError as e:
         logger.error(f"DependencyTrack upload failed: {e}")
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail="Failed to upload to DependencyTrack",
         ) from e
+
+    # Relay DT failures verbatim; on success, return the polling URL the
+    # publisher should query for processing status.
+    if not dt_response.ok:
+        return Response(
+            content=dt_response.content,
+            status_code=dt_response.status_code,
+            media_type="application/json",
+        )
+
+    try:
+        token = dt_response.json()["token"]
+    except (ValueError, KeyError):
+        # DT returned a 2xx with an unexpected body shape — the upload
+        # likely landed, but we can't hand the publisher a polling URL.
+        # Log full context and re-raise so FastAPI returns 500: a retry
+        # is NOT safe (it would duplicate the SBOM in DT).
+        logger.error(
+            f"DependencyTrack returned unparseable success response "
+            f"(status={dt_response.status_code}, body={dt_response.text!r})"
+        )
+        raise
+
+    dt_url = str(settings.dependency_track_url).rstrip("/")
+    return PiaUploadResponse(
+        polling_url=f"{dt_url}/token/{token}",  # type: ignore[arg-type]
+    )
