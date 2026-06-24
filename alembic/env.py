@@ -1,9 +1,10 @@
 from logging.config import fileConfig
 
-from sqlalchemy import engine_from_config
-from sqlalchemy import pool
-
 from alembic import context
+from sqlalchemy import engine_from_config, pool
+
+from pia.config import Settings
+from pia.models import Base
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
@@ -14,11 +15,12 @@ config = context.config
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
-# add your model's MetaData object here
-# for 'autogenerate' support
-# from myapp import mymodel
-# target_metadata = mymodel.Base.metadata
-target_metadata = None
+# Load DB URL from PIA settings (PIA_DATABASE_URL env var) and inject it into
+# the Alembic config, overriding any sqlalchemy.url in alembic.ini.
+config.set_main_option("sqlalchemy.url", Settings().database_url)
+
+# Metadata for 'autogenerate' to compare against the live DB.
+target_metadata = Base.metadata
 
 # other values from the config, defined by the needs of env.py,
 # can be acquired:
