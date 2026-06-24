@@ -8,7 +8,7 @@ WORKDIR /app
 ENV UV_COMPILE_BYTECODE=1
 
 # note: we need README.md because it is referenced in pyproject.toml
-COPY pyproject.toml uv.lock README.md ./
+COPY alembic/ alembic.ini pyproject.toml uv.lock README.md ./
 
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --no-dev --no-install-project
@@ -24,6 +24,9 @@ WORKDIR /app
 
 COPY --from=builder --chown=app:app /app/.venv /app/.venv
 COPY --from=builder --chown=app:app /app/pia /app/pia
+COPY --from=builder --chown=app:app /app/pyproject.toml /app/pyproject.toml
+COPY --from=builder --chown=app:app /app/alembic /app/alembic
+COPY --from=builder --chown=app:app /app/alembic.ini /app/alembic.ini
 
 ENV PATH="/app/.venv/bin:$PATH" \
     PYTHONUNBUFFERED=1 \
