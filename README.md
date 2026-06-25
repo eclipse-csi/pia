@@ -56,5 +56,5 @@ To auto-generate a migration script, when adding, removing or changing PIA ORM
 models (see `pia/models.py`), run below command and add the resulting script to
 version control.
 ```shell
-docker compose run --rm --entrypoint='alembic revision --autogenerate --message "MESSAGE"' pia
+docker compose run --rm pia alembic revision --autogenerate --message "MESSAGE"
 ```
