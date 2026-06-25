@@ -8,7 +8,8 @@ WORKDIR /app
 ENV UV_COMPILE_BYTECODE=1
 
 # note: we need README.md because it is referenced in pyproject.toml
-COPY alembic/ alembic.ini pyproject.toml uv.lock README.md ./
+COPY alembic.ini pyproject.toml uv.lock README.md ./
+COPY alembic/ ./alembic/
 
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --no-dev --no-install-project
