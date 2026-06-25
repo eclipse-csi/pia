@@ -37,6 +37,22 @@ jobs:
 
   docker-build:
     runs-on: ubuntu-latest
+    services:
+      # The image runs "alembic upgrade head" on startup (see start.sh), so the
+      # smoke test needs a reachable database.
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_USER: pia
+          POSTGRES_PASSWORD: pia
+          POSTGRES_DB: pia
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U pia -d pia"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
     steps:
     - name: Checkout
       uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3 # v6.0.0
@@ -64,11 +80,14 @@ jobs:
 
     - name: Run Docker container
       run: |
+        # --network host so the container reaches the postgres service via
+        # localhost:5432 (the service port is published on the runner host).
+        # With host networking the app is reachable at localhost:8000 directly.
         docker run -d \
           --name pia-test \
-          -p 8000:8000 \
+          --network host \
           -e PIA_DEPENDENCY_TRACK_API_KEY=test-key \
-          -e PIA_DATABASE_URL=postgresql://dummy \
+          -e PIA_DATABASE_URL=postgresql://pia:pia@localhost:5432/pia \
           eclipse-csi/pia:test
 
     - name: Wait for container to be healthy
