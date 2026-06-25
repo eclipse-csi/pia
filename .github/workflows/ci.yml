@@ -82,19 +82,14 @@ jobs:
           -e PIA_DATABASE_URL=postgresql://pia:pia@localhost:5432/pia \
           eclipse-csi/pia:test
 
-    - name: Wait for container to be healthy
-      run: |
-        timeout 30 bash -c 'while ! curl -f http://localhost:8000/docs &>/dev/null; do sleep 1; done'
-
     - name: Test API response
       run: |
-        response=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8000/docs)
-        if [ "$response" != "200" ]; then
-          echo "API test failed with response code: $response"
+        if ! timeout 30 bash -c 'until curl -fs http://localhost:8000/livez >/dev/null; do sleep 1; done'; then
+          echo "API did not become healthy within 30s"
           docker logs pia-test
           exit 1
         fi
-        echo "API test passed with response code: $response"
+        echo "API test passed: /livez responded"
 
     - name: Clean up
       run: |
