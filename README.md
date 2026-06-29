@@ -43,3 +43,18 @@ Auto-fix linting issues and auto-format
 ```bash
 uv run ruff check --fix && uv run ruff format
 ```
+
+### Database Migration
+
+PIA uses [`alembic`](https://alembic.sqlalchemy.org/en/latest/) for database
+migrations. Migration scripts live in `alembic/versions/` and are automatically
+applied as part of the deployment.
+
+#### Creating Migration Scripts
+
+To auto-generate a migration script, when adding, removing or changing PIA ORM
+models (see `pia/models.py`), run below command and add the resulting script to
+version control.
+```shell
+docker compose run --rm pia alembic revision --autogenerate --message "MESSAGE"
+```
