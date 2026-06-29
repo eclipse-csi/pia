@@ -105,15 +105,15 @@ async def authenticate(
         logger.warning(f"Token decode failed: {e}")
         _401("Invalid token")
 
-    logger.info(f"Unverified issuer extracted: {unverified_issuer}")
+    logger.info(f"Unverified issuer extracted: {unverified_issuer!a}")
 
     # Inexpensive pre-verification check
     if not is_issuer_known(unverified_issuer):
-        logger.warning(f"Issuer {unverified_issuer} not allowed")
+        logger.warning(f"Issuer {unverified_issuer!a} not allowed")
         _401("Issuer not allowed")
 
     logger.info(
-        f"Issuer '{unverified_issuer}' is allowed, proceeding with token verification"
+        f"Issuer '{unverified_issuer!a}' is allowed, proceeding with token verification"
     )
     # Full token verification
     try:

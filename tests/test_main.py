@@ -1,6 +1,7 @@
 """Tests for api module."""
 
 import asyncio
+import logging
 from unittest.mock import Mock, patch
 
 import jwt
@@ -304,3 +305,33 @@ class TestHealthEndpoints:
         response = client.get("/livez")
         assert response.status_code == 200
         assert response.json() == {"status": "ok"}
+
+
+@pytest.mark.usefixtures("setup_env")
+class TestNewlineEscaping:
+    """Regression for escaping newlines when logging unverified JWT `iss`."""
+
+    @patch("pia.main.jwt.decode")
+    def test_newline_in_unverified_iss_does_not_split_records(
+        self, mock_decode, seed_db, caplog
+    ):
+        from pia.main import authenticate
+
+        forged_iss = (
+            "https://x.example\n"
+            "2026-04-27 09:00:00,000 - pia.main - INFO - forged record"
+        )
+        mock_decode.return_value = {"iss": forged_iss}
+
+        with (
+            caplog.at_level(logging.INFO, logger="pia.main"),
+            pytest.raises(HTTPException),
+        ):
+            asyncio.run(authenticate(BEARER_TOKEN, seed_db))
+
+        for record in caplog.records:
+            msg = record.getMessage()
+            assert "\n" not in msg, f"newline leaked into: {msg!r}"
+        assert any("\\n" in r.getMessage() for r in caplog.records), (
+            "expected escaped newline somewhere in captured logs"
+        )
