@@ -20,9 +20,11 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-    # Reuse the image's start.sh (migrate + uvicorn) and add --reload, which is
-    # forwarded to uvicorn for hot-reloading of mounted code in dev.
-    command: ["/app/start.sh", "--reload"]
+    # Dev-only convenience: apply migrations, then start the app with --reload
+    # for hot-reloading of the mounted code. In production migrations are run as
+    # a separate step (a Helm pre-upgrade hook job), not on app startup, so the
+    # image's default CMD is plain uvicorn.
+    command: ["sh", "-c", "alembic upgrade head && uvicorn pia.main:app --host 0.0.0.0 --port 8000 --reload"]
   postgres:
     image: postgres:18-alpine
     container_name: pia-postgres

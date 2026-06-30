@@ -8,7 +8,7 @@ WORKDIR /app
 ENV UV_COMPILE_BYTECODE=1
 
 # note: we need README.md because it is referenced in pyproject.toml
-COPY start.sh alembic.ini pyproject.toml uv.lock README.md ./
+COPY alembic.ini pyproject.toml uv.lock README.md ./
 COPY alembic/ ./alembic/
 
 RUN --mount=type=cache,target=/root/.cache/uv \
@@ -28,7 +28,6 @@ COPY --from=builder --chown=app:app /app/pia /app/pia
 COPY --from=builder --chown=app:app /app/pyproject.toml /app/pyproject.toml
 COPY --from=builder --chown=app:app /app/alembic /app/alembic
 COPY --from=builder --chown=app:app /app/alembic.ini /app/alembic.ini
-COPY --from=builder --chown=app:app --chmod=755 /app/start.sh /app/start.sh
 
 ENV PATH="/app/.venv/bin:$PATH" \
     PYTHONUNBUFFERED=1 \
@@ -38,5 +37,8 @@ USER app
 
 EXPOSE 8000
 
-# Apply db migrations and start the app
-CMD ["/app/start.sh"]
+# Start the app. Database migrations are NOT run here; they are applied as a
+# separate step before rollout (a Helm pre-upgrade hook job in production that
+# runs `alembic upgrade head` using this same image). The alembic CLI is
+# available in the image for that override.
+CMD ["uvicorn", "pia.main:app", "--host", "0.0.0.0", "--port", "8000"]
