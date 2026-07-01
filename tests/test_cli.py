@@ -141,6 +141,38 @@ def test_add_workload_invalid_github_url(runner):
     assert "owner/repo" in result.output
 
 
+@pytest.mark.parametrize(
+    "url",
+    [
+        # GitHub host disguised via userinfo / suffix, or wrong scheme.
+        "https://github.com@evil.example/eclipse-foo/repo",
+        "https://github.com.evil.example/eclipse-foo/repo",
+        "http://github.com/eclipse-foo/repo",
+        # Jenkins host disguised via userinfo / suffix, or wrong scheme.
+        "https://ci.eclipse.org@evil.example/eclipse-bar/oidc",
+        "https://ci.eclipse.org.evil.example/eclipse-bar/oidc",
+        "http://ci.eclipse.org/eclipse-bar/oidc",
+    ],
+)
+def test_add_workload_rejects_disguised_or_non_https_host(
+    runner, session_factory, monkeypatch, url
+):
+    # A disguised host must be rejected during URL validation, before any
+    # network call (e.g. resolving the GitHub owner id) or DB write.
+    def fail(*a, **kw):
+        raise AssertionError("network must not be touched for a rejected URL")
+
+    monkeypatch.setattr(cli_module.requests, "get", fail)
+
+    result = runner.invoke(cli_module.cli, ["add-workload", "eclipse-foo", url])
+
+    assert result.exit_code != 0
+    assert "URL must be" in result.output
+    with session_factory() as s:
+        assert s.query(GitHubWorkload).count() == 0
+        assert s.query(JenkinsWorkload).count() == 0
+
+
 def test_missing_database_url_fails_early(runner, monkeypatch):
     """Without PIA_DATABASE_URL the cli group exits before any subcommand runs."""
     monkeypatch.delenv("PIA_DATABASE_URL", raising=False)

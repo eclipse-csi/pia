@@ -24,8 +24,34 @@ class TestIsIssuerKnown:
     def test_jenkins_issuer_known(self):
         assert is_issuer_known("https://ci.eclipse.org/eclipse-other/oidc")
 
+    def test_jenkins_issuer_bare_host_known(self):
+        assert is_issuer_known("https://ci.eclipse.org")
+
     def test_arbitrary_issuer_unknown(self):
         assert not is_issuer_known("https://attacker.com")
+
+    @pytest.mark.parametrize(
+        "issuer",
+        [
+            # Userinfo before "@": the real host is other.host, not ci.eclipse.org.
+            "https://ci.eclipse.org@other.host",
+            "https://ci.eclipse.org@127.0.0.1:8888",
+            # Suffix on the host: ci.eclipse.org.other.host is a different host.
+            "https://ci.eclipse.org.other.host",
+            "https://ci.eclipse.org.other.host/eclipse-x/oidc",
+            # Host is only a prefix substring, not the whole host.
+            "https://ci.eclipse.org.evil.example/.well-known/openid-configuration",
+        ],
+    )
+    def test_issuer_resolving_to_other_host_unknown(self, issuer):
+        assert not is_issuer_known(issuer)
+
+    def test_non_https_jenkins_issuer_unknown(self):
+        assert not is_issuer_known("http://ci.eclipse.org/eclipse-other/oidc")
+
+    def test_malformed_issuer_unknown(self):
+        assert not is_issuer_known("ci.eclipse.org")
+        assert not is_issuer_known("not a url")
 
 
 class TestFindWorkloadByClaims:
