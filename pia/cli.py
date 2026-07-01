@@ -42,7 +42,8 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 
 from .models import (
-    JENKINS_ISSUER_PREFIX,
+    GITHUB_BASE_URL,
+    JENKINS_ISSUER_BASE_URL,
     DependencyTrackProject,
     EclipseFoundationProject,
     GitHubWorkload,
@@ -130,11 +131,12 @@ def add_workload(ef_project_id: str, url: str, dry_run: bool) -> None:
     """Register a GitHub or Jenkins workload for an Eclipse Foundation project.
 
     URL type is determined by its value: github.com URLs create a GitHubWorkload,
-    URLs starting with the Jenkins issuer prefix create a JenkinsWorkload with the
-    URL as issuer. Any other URL is rejected.
+    ci.eclipse.org URLs create a JenkinsWorkload with the URL as issuer. Both are
+    matched on the URL's scheme and host. Any other URL is rejected.
     """
     parsed = urlparse(url)
-    if parsed.netloc == "github.com":
+    base_url = f"{parsed.scheme}://{parsed.hostname}"
+    if base_url == GITHUB_BASE_URL:
         path_parts = parsed.path.strip("/").split("/")
         if len(path_parts) != 2 or not all(path_parts):
             raise click.ClickException(f"GitHub URL must include owner/repo: {url}")
@@ -150,15 +152,15 @@ def add_workload(ef_project_id: str, url: str, dry_run: bool) -> None:
             f"Prepared GitHubWorkload(ef_project_id={ef_project_id!r}, "
             f"repo_owner={owner!r}, repo_name={repo!r}, repo_owner_id={owner_id})"
         )
-    elif url.startswith(JENKINS_ISSUER_PREFIX):
+    elif base_url == JENKINS_ISSUER_BASE_URL:
         workload = JenkinsWorkload(ef_project_id=ef_project_id, issuer=url)
         logger.info(
             f"Prepared JenkinsWorkload(ef_project_id={ef_project_id!r}, issuer={url!r})"
         )
     else:
         raise click.ClickException(
-            f"URL must be a GitHub repo URL or start with {JENKINS_ISSUER_PREFIX!r}: "
-            f"{url}"
+            f"URL must be a {GITHUB_BASE_URL} repo URL or a "
+            f"{JENKINS_ISSUER_BASE_URL} issuer URL: {url}"
         )
 
     with _make_session() as session:

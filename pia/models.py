@@ -2,6 +2,7 @@
 
 import logging
 from typing import Any
+from urllib.parse import urlparse
 
 from pydantic import BaseModel, ConfigDict, Field, HttpUrl
 from sqlalchemy import ForeignKey, Select, String, UniqueConstraint, select
@@ -13,8 +14,11 @@ logger = logging.getLogger(__name__)
 GITHUB_ISSUER = "https://token.actions.githubusercontent.com"
 """OIDC issuer for GitHub Actions tokens. Constant across all GitHub workloads."""
 
-JENKINS_ISSUER_PREFIX = "https://ci.eclipse.org"
-"""Prefix used for early validation of Jenkins issuer URLs."""
+GITHUB_BASE_URL = "https://github.com"
+"""Scheme and host of the GitHub repo URLs accepted when registering workloads."""
+
+JENKINS_ISSUER_BASE_URL = "https://ci.eclipse.org"
+"""Scheme and host every Jenkins issuer URL must have."""
 
 GITHUB_ALLOWED_EVENT_NAMES = frozenset({"push", "workflow_dispatch"})
 """Allowed values for the GitHub OIDC token's `event_name` claim.
@@ -131,12 +135,14 @@ def is_issuer_known(issuer: str) -> bool:
     """Check if issuer is generally known to PIA.
 
     GitHub: issuer must equal GITHUB_ISSUER
-    Jenkins: issuer must start with JENKINS_ISSUER_PREFIX
+    Jenkins: issuer's scheme and host must equal JENKINS_ISSUER_BASE_URL
+
     """
     if issuer == GITHUB_ISSUER:
         return True
 
-    return issuer.startswith(JENKINS_ISSUER_PREFIX)
+    parsed = urlparse(issuer)
+    return f"{parsed.scheme}://{parsed.hostname}" == JENKINS_ISSUER_BASE_URL
 
 
 def find_workload_by_claims(

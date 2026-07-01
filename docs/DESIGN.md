@@ -154,7 +154,8 @@ sequenceDiagram
    2. Extract issuer
    3. Verify issuer is known
       - GitHub: Full match: `https://token.actions.githubusercontent.com`
-      - Jenkins: Prefix match: `https://ci.eclipse.org`
+      - Jenkins: Parse the issuer as a URL and require an `https` scheme with
+        the host exactly equal to `ci.eclipse.org`
 3. Token Key Discovery
    1. Fetch OIDC configuration from `{issuer}/.well-known/openid-configuration`
    2. Extract `jwks_uri` from configuration
