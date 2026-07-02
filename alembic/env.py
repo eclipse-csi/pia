@@ -1,9 +1,9 @@
+import os
 from logging.config import fileConfig
 
 from alembic import context
 from sqlalchemy import engine_from_config, pool
 
-from pia.config import Settings
 from pia.models import Base
 
 # this is the Alembic Config object, which provides
@@ -15,9 +15,16 @@ config = context.config
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
-# Load DB URL from PIA settings (PIA_DATABASE_URL env var) and inject it into
-# the Alembic config, overriding any sqlalchemy.url in alembic.ini.
-config.set_main_option("sqlalchemy.url", Settings().database_url)
+# Load the DB URL from the PIA_DATABASE_URL env var and inject it into the
+# Alembic config, overriding any sqlalchemy.url in alembic.ini. We read the
+# environment directly (rather than the full app Settings) so migrations only
+# depend on the database connection, not on unrelated runtime config such as
+# the Dependency Track API key. This lets migrations run under a dedicated,
+# minimally-scoped database user (e.g. a Helm pre-upgrade hook job).
+database_url = os.environ.get("PIA_DATABASE_URL")
+if not database_url:
+    raise SystemExit("PIA_DATABASE_URL is not set")
+config.set_main_option("sqlalchemy.url", database_url)
 
 # Metadata for 'autogenerate' to compare against the live DB.
 target_metadata = Base.metadata

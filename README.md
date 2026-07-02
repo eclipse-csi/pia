@@ -47,8 +47,15 @@ uv run ruff check --fix && uv run ruff format
 ### Database Migration
 
 PIA uses [`alembic`](https://alembic.sqlalchemy.org/en/latest/) for database
-migrations. Migration scripts live in `alembic/versions/` and are automatically
-applied as part of the deployment.
+migrations. Migration scripts live in `alembic/versions/`.
+
+Migrations are applied as a dedicated step before the app rolls out, by running
+`alembic upgrade head` with the application image — in production via a Helm
+`pre-install`/`pre-upgrade` hook job (see the [helm
+chart](https://github.com/eclipse-csi/helm-charts/tree/main/charts/pia)). The
+app itself does not run migrations on startup, so its runtime database user only
+needs read access. In local development, the `docker-compose` setup applies
+migrations automatically before starting the app for convenience.
 
 #### Creating Migration Scripts
 

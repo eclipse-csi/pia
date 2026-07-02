@@ -70,11 +70,22 @@ jobs:
         cache-from: type=gha
         cache-to: type=gha,mode=max
 
+    - name: Run database migrations
+      run: |
+        # Mirrors the production Helm pre-upgrade hook: run "alembic upgrade
+        # head" via the image to verify the migration scripts apply cleanly.
+        # --network host so the container reaches the postgres service at
+        # localhost:5432 (the service port is published on the runner host).
+        docker run --rm \
+          --network host \
+          -e PIA_DATABASE_URL=postgresql://pia:pia@localhost:5432/pia \
+          eclipse-csi/pia:test \
+          alembic upgrade head
+
     - name: Run Docker container
       run: |
-        # --network host so the container reaches the postgres service via
-        # localhost:5432 (the service port is published on the runner host).
-        # With host networking the app is reachable at localhost:8000 directly.
+        # Default CMD (uvicorn, no migration). --network host so the app is
+        # reachable at localhost:8000 directly.
         docker run -d \
           --name pia-test \
           --network host \
