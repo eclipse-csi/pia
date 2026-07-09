@@ -38,7 +38,11 @@ logger.info("PIA application settings loaded successfully")
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Initialize database engine and session factory on app startup."""
-    engine = create_engine(settings.database_url)
+    engine = create_engine(
+        settings.database_url,
+        pool_pre_ping=True,
+        pool_recycle=1800,
+    )
     app.state.session_factory = sessionmaker(bind=engine)
     logger.info("Database engine and session factory initialized")
     yield
