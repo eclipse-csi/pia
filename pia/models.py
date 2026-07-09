@@ -128,7 +128,11 @@ class DependencyTrackProject(Base):
     name: Mapped[str] = mapped_column(String)
     parent_uuid: Mapped[str] = mapped_column(String)
 
-    __table_args__ = (UniqueConstraint("name", "parent_uuid"),)
+    # A product_name must map to exactly one DependencyTrack project within an
+    # Eclipse Foundation project: the runtime resolves the upload target with
+    # find_dt_project(ef_project_id, name) via scalar_one_or_none(), so
+    # (ef_project_id, name) must be unique.
+    __table_args__ = (UniqueConstraint("ef_project_id", "name"),)
 
 
 def is_issuer_known(issuer: str) -> bool:

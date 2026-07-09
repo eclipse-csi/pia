@@ -2,9 +2,12 @@
 
 import pytest
 from pydantic import ValidationError
+from sqlalchemy.exc import IntegrityError
 
 from pia.models import (
+    DependencyTrackProject,
     DependencyTrackUploadPayload,
+    EclipseFoundationProject,
     GitHubWorkload,
     JenkinsWorkload,
     PiaUploadPayload,
@@ -172,6 +175,44 @@ class TestFindDtProject:
     def test_wrong_name(self, seed_db):
         dt_project = find_dt_project(seed_db, "eclipse-test", "no-such-product")
         assert dt_project is None
+
+    def test_name_unique_within_ef_project(self, session):
+        """(ef_project_id, name) is unique, so a product_name maps to one project."""
+        session.add(EclipseFoundationProject(id="eclipse-test"))
+        session.add(
+            DependencyTrackProject(
+                ef_project_id="eclipse-test", name="server", parent_uuid="uuid-a"
+            )
+        )
+        session.add(
+            DependencyTrackProject(
+                ef_project_id="eclipse-test", name="server", parent_uuid="uuid-b"
+            )
+        )
+        with pytest.raises(IntegrityError):
+            session.commit()
+
+    def test_same_name_allowed_in_different_ef_projects(self, session):
+        """The same product_name may exist under different EF projects."""
+        session.add_all(
+            [
+                EclipseFoundationProject(id="eclipse-test"),
+                EclipseFoundationProject(id="eclipse-other"),
+                DependencyTrackProject(
+                    ef_project_id="eclipse-test", name="server", parent_uuid="uuid-a"
+                ),
+                DependencyTrackProject(
+                    ef_project_id="eclipse-other", name="server", parent_uuid="uuid-b"
+                ),
+            ]
+        )
+        session.commit()  # no IntegrityError
+        assert (
+            find_dt_project(session, "eclipse-test", "server").parent_uuid == "uuid-a"
+        )
+        assert (
+            find_dt_project(session, "eclipse-other", "server").parent_uuid == "uuid-b"
+        )
 
 
 class TestUploadSBOMPayload:

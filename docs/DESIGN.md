@@ -261,7 +261,8 @@ A CI/CD entity that can upload SBOMs. Uses joined-table inheritance with a
 
 #### GitHubWorkload (extends Workload)
 Issuer is always `https://token.actions.githubusercontent.com` (constant, not
-stored).
+stored). Unique on `(repo_owner, repo_name, repo_owner_id)` — not scoped by
+`ef_project_id`, so a repository maps to a single workload.
 
 | Column | Type | Notes |
 |--------|------|-------|
@@ -271,7 +272,8 @@ stored).
 | `repo_owner_id` | String | GitHub numeric owner ID |
 
 #### JenkinsWorkload (extends Workload)
-Each Jenkins workload has a distinct issuer URL.
+Each Jenkins workload has a distinct issuer URL (`issuer` is unique, not scoped
+by `ef_project_id`).
 
 | Column | Type | Notes |
 |--------|------|-------|
@@ -279,7 +281,9 @@ Each Jenkins workload has a distinct issuer URL.
 | `issuer` | String | OIDC issuer URL (e.g. `https://ci.eclipse.org/<name>/oidc`) |
 
 #### DependencyTrackProject
-A DependencyTrack target for SBOM uploads.
+A DependencyTrack target for SBOM uploads. Unique on `(ef_project_id, name)`, so a
+`product_name` resolves to exactly one DependencyTrack project within an Eclipse
+Foundation project.
 
 | Column | Type | Notes |
 |--------|------|-------|
@@ -293,6 +297,22 @@ A DependencyTrack target for SBOM uploads.
 The Eclipse Foundation project id is the authorization boundary. Any workload
 can upload SBOMs for any DependencyTrack project that shares the same Eclipse
 Foundation project id.
+
+A workload identity — a GitHub repository (`repo_owner`, `repo_name`,
+`repo_owner_id`) or a Jenkins `issuer` — belongs to **exactly one** Eclipse
+Foundation project. This is a design choice, enforced by the workload uniqueness
+constraints above (which are deliberately *not* scoped by `ef_project_id`): the
+OIDC token carries only the workload identity, so `find_workload_by_claims`
+resolves it to a single workload and hence a single EF-project scope. Within that
+scope the target DependencyTrack project is selected by `product_name`, and the
+`(ef_project_id, name)` uniqueness constraint makes that selection unambiguous.
+
+Note that authentication does not *require* the one-to-one workload↔project
+relationship — a one-to-many model could authenticate the same identity for
+several projects. The invariant that must hold for correctness is narrower: a
+`product_name` must resolve to a single DependencyTrack project within the
+authenticated scope. The current model satisfies it the simple way (one workload
+→ one EF project → per-project unique `product_name`).
 
 
 ## 5. Implementation Details
