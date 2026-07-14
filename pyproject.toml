@@ -18,11 +18,7 @@ dependencies = [
     "sqlalchemy>=2.0.0",
     "psycopg2-binary>=2.9.0",
     "alembic>=1.15.0",
-    "click>=8.1.0",
 ]
-
-[project.scripts]
-pia = "pia.cli:cli"
 
 [dependency-groups]
 dev = [

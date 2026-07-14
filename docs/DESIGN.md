@@ -305,7 +305,6 @@ Foundation project id.
 - **JWT Library**: `PyJWT` with `cryptography` support
   - Handles token parsing, validation, and signature verification
   - Includes `PyJWKClient` for JWKS key fetching
-- **CLI**: `click`
 - **Testing**: `pytest`
 - **Linting**: `ruff`
 - **Python Project Management**: `uv`
@@ -324,8 +323,6 @@ Foundation project id.
   - Pydantic request models: `PiaUploadPayload`, `DependencyTrackUploadPayload`
 - `oidc.py`: OIDC token validation and signature verification using PyJWT
 - `dependencytrack.py`: DependencyTrack API upload client for SBOMs
-- `cli.py`: Management CLI for registering Workloads and DependencyTrackProjects
-  (see section 5.5)
 
 ### 5.3 Error Handling
 
@@ -355,43 +352,6 @@ Metrics to track:
 - Token verification time
 - DependencyTrack upload time
 - Total API response time
-
-### 5.5 CLI Tool
-
-PIA includes a management CLI (`pia`) for registering workloads and
-DependencyTrack projects. It is installed as a console entry point via
-`pyproject.toml` and connects to the DB using the `PIA_DATABASE_URL`
-environment variable, e.g. `postgresql://user:secret@1.2.3.4:5432/pia`.
-
-#### `pia add-workload <ef_project_id> <url>`
-
-Registers a new workload for an Eclipse Foundation project. The workload type
-is determined by the URL:
-
-- **GitHub** (URL contains `github.com`): Parses `owner` and `repo` from the
-  URL path. Queries the GitHub API (`GET https://api.github.com/users/{owner}`)
-  to fetch the numeric `repo_owner_id`. Creates a `GitHubWorkload`.
-- **Jenkins** (URL starts with `https://ci.eclipse.org`): Uses the URL as
-  `issuer`. Creates a `JenkinsWorkload`.
-
-If the `EclipseFoundationProject` row for `ef_project_id` does not exist, it is
-created automatically.
-
-#### `pia add-dt-project <ef_project_id> <dt_url> <parent_name> <project_name>`
-
-Registers a DependencyTrack project for an Eclipse Foundation project. Looks up
-the project in DependencyTrack by name hierarchy:
-
-1. Find exactly one root project by `parent_name`.
-2. Find exactly one child project by `project_name`
-3. Store `DependencyTrackProject(name=project_name, parent_uuid=<child project UUID>)`
-
-The `dt_url` argument is the DependencyTrack base URL (e.g.
-`https://sbom.eclipse.org`). Authentication uses the `PIA_DEPENDENCY_TRACK_API_KEY`
-environment variable. The API key requires at least the `VIEW_PORTFOLIO` permission.
-
-If the `EclipseFoundationProject` row for `ef_project_id` does not exist, it is
-created automatically.
 
 ## 6. Security Considerations
 
