@@ -322,6 +322,7 @@ project bound to a single EF project.
 - **JWT Library**: `PyJWT` with `cryptography` support
   - Handles token parsing, validation, and signature verification
   - Includes `PyJWKClient` for JWKS key fetching
+- **CLI**: `click`
 - **Testing**: `pytest`
 - **Linting**: `ruff`
 - **Python Project Management**: `uv`
@@ -340,6 +341,8 @@ project bound to a single EF project.
   - Pydantic request models: `PiaUploadPayload`, `DependencyTrackUploadPayload`
 - `oidc.py`: OIDC token validation and signature verification using PyJWT
 - `dependencytrack.py`: DependencyTrack API upload client for SBOMs
+- `cli.py`: Management CLI for registering Workloads and DependencyTrackProjects
+  (see section 5.5)
 
 ### 5.3 Error Handling
 
@@ -369,6 +372,36 @@ Metrics to track:
 - Token verification time
 - DependencyTrack upload time
 - Total API response time
+
+### 5.5 CLI Tool
+
+PIA includes a management CLI (`pia`) for managing project authorizations. It is
+installed as a console entry point via `pyproject.toml` and connects to the DB
+using the `PIA_DATABASE_URL` environment variable, e.g.
+`postgresql://user:secret@1.2.3.4:5432/pia`.
+
+#### `pia sync`
+
+Reconciles the whole authorization state to match a curated projects file. The
+file lists Eclipse Foundation projects, each with a flat list of workload URLs
+(GitHub repo or Jenkins instance URL — classified by host) and a list of
+DependencyTrack `(parent, project)` mappings. `sync` resolves the external
+data (GitHub owner ids, DependencyTrack child UUIDs), diffs the desired state
+against the database, prints a plan, and applies it so the database matches the
+file.
+
+Example projects file:
+
+```yaml
+projects:
+  - id: technology.foo
+    workloads:
+      - https://github.com/eclipse-foo/repo
+      - https://ci.eclipse.org/foo
+    dependency_track:
+      - parent: "Eclipse Foo"
+        project: foo-server
+```
 
 ## 6. Security Considerations
 

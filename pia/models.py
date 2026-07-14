@@ -20,6 +20,14 @@ GITHUB_BASE_URL = "https://github.com"
 JENKINS_ISSUER_BASE_URL = "https://ci.eclipse.org"
 """Scheme and host every Jenkins issuer URL must have."""
 
+JENKINS_OIDC_SUFFIX = "/oidc"
+"""Path suffix appended to a Jenkins workload URL to form its OIDC issuer.
+
+Each Eclipse Jenkins project serves its issuer at
+``https://ci.eclipse.org/<name>/oidc`` (see docs/DESIGN.md §7.2). Curated
+project files list the workload URL (``https://ci.eclipse.org/<name>``); PIA
+appends this suffix."""
+
 GITHUB_ALLOWED_EVENT_NAMES = frozenset({"push", "workflow_dispatch"})
 """Allowed values for the GitHub OIDC token's `event_name` claim.
 
@@ -49,6 +57,14 @@ class EclipseFoundationProject(Base):
     # via its `ef_project_id` foreign key. Uniqueness is implicit through the
     # single column.
     id: Mapped[str] = mapped_column(String, primary_key=True)
+
+    @property
+    def diff_key(self) -> tuple[str, ...]:
+        return (self.id,)
+
+    def __repr__(self) -> str:
+        # extra space is intentional to align with other models
+        return f"Eclipse Project  ({self.id})"
 
 
 class Workload(Base):
@@ -107,6 +123,17 @@ class GitHubWorkload(Workload):
         "polymorphic_identity": "github",
     }
 
+    @property
+    def diff_key(self) -> tuple[str, ...]:
+        return (self.ef_project_id, self.repo_owner, self.repo_name, self.repo_owner_id)
+
+    def __repr__(self) -> str:
+        # extra space is intentional to align with other models
+        return (
+            f"Github Workload  (project: {self.ef_project_id}, "
+            f"repo: {self.repo_owner}/{self.repo_name}, owner id: {self.repo_owner_id})"
+        )
+
 
 class JenkinsWorkload(Workload):
     """Jenkins workload. Each instance has a distinct issuer URL."""
@@ -121,6 +148,15 @@ class JenkinsWorkload(Workload):
     __mapper_args__ = {
         "polymorphic_identity": "jenkins",
     }
+
+    @property
+    def diff_key(self) -> tuple[str, ...]:
+        return (self.ef_project_id, self.issuer)
+
+    def __repr__(self) -> str:
+        return (
+            f"Jenkins Workload (project: {self.ef_project_id}, issuer: {self.issuer})"
+        )
 
 
 class DependencyTrackProject(Base):
@@ -150,6 +186,17 @@ class DependencyTrackProject(Base):
         # different EF projects to e.g. upload a product named "cli" or "server".
         UniqueConstraint("ef_project_id", "name"),
     )
+
+    @property
+    def diff_key(self) -> tuple[str, ...]:
+        return (self.ef_project_id, self.name, self.parent_uuid)
+
+    def __repr__(self) -> str:
+        # extra space is intentional to align with other models
+        return (
+            f"DependencyTrack  (project: {self.ef_project_id}, "
+            f"name: {self.name}, parent id: {self.parent_uuid})"
+        )
 
 
 def is_issuer_known(issuer: str) -> bool:
