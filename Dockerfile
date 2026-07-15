@@ -1,3 +1,13 @@
+# This is a single image for all three PIA entrypoints: the web app (the default
+# CMD, `uvicorn`), the database migration job (`alembic upgrade head`), and the
+# management CLI (`pia sync`). They share the same code, ORM models, and
+# migration scripts and must stay version-locked with each other, so bundling
+# them avoids the drift and release complexity of keeping separate images in
+# sync; the callers simply override the command. The extra footprint is
+# negligible — the CLI adds only `click` (already pulled in by uvicorn) and
+# `pyyaml` — so splitting it out would add build/publish overhead for no
+# meaningful size or attack-surface gain.
+
 # Build stage
 FROM python:3.14.2-slim@sha256:2751cbe93751f0147bc1584be957c6dd4c5f977c3d4e0396b56456a9fd4ed137 AS builder
 
