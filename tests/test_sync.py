@@ -16,10 +16,15 @@ from pia.models import (
 )
 from pia.sync import (
     DB,
+    DtProjectSpec,
+    ProjectsFile,
+    ProjectSpec,
     apply_plan,
     classify_workload_url,
     compute_plan,
+    ensure_dt_projects,
     load_projects_file,
+    resolve_dt_child_uuid,
     validate_projects_file,
 )
 
@@ -465,7 +470,9 @@ def patch_cli(session_factory, monkeypatch):
     monkeypatch.setattr(
         sync_module,
         "resolve_dt_child_uuid",
-        lambda dt_url, parent, project, api_key, root_cache=None: "uuid-1",
+        lambda dt_url, parent, project, api_key, root_cache=None, create=False: (
+            "uuid-1"
+        ),
     )
 
 
@@ -534,8 +541,8 @@ def test_sync_dry_run_writes_nothing(runner, tmp_path, session_factory, patch_cl
 def test_sync_fails_on_missing_dt_project(
     runner, tmp_path, session_factory, monkeypatch
 ):
-    # sync resolves DependencyTrack projects read-only, so a missing one is a hard
-    # error rather than something it provisions.
+    # sync never creates DependencyTrack projects: a missing one is a hard error
+    # that points the operator at `pia create-dt-projects`, and no PUT is issued.
     # (patch_cli is intentionally not used: it stubs resolve_dt_child_uuid, which is
     # exactly the resolution path under test.)
     monkeypatch.setenv("PIA_DATABASE_URL", "sqlite:///:memory:")
@@ -545,6 +552,11 @@ def test_sync_fails_on_missing_dt_project(
         sync_module, "fetch_github_owner_id", lambda owner, token=None: "42"
     )
     monkeypatch.setattr(sync_module.requests, "get", lambda *a, **k: _resp([]))
+
+    def fail_put(*a, **k):
+        raise AssertionError("sync must not create DependencyTrack projects")
+
+    monkeypatch.setattr(sync_module.requests, "put", fail_put)
 
     f = _write(
         tmp_path,
@@ -559,6 +571,7 @@ def test_sync_fails_on_missing_dt_project(
     result = runner.invoke(cli_module.cli, ["sync", f, "--dt-url", "https://dt"])
     assert result.exit_code != 0
     assert "Expected exactly one root" in result.output
+    assert "create-dt-projects" in result.output
 
 
 def test_sync_apply_creates_rows(runner, tmp_path, session_factory, patch_cli):
@@ -629,3 +642,150 @@ def test_sync_updates_and_deletions_require_allow_flag(
             s.query(EclipseFoundationProject).filter_by(id="eclipse-stale").count() == 0
         )
         assert s.query(GitHubWorkload).count() == 1
+
+
+# --------------------------------------------------------------------------- #
+# DependencyTrack project creation (resolve_dt_child_uuid / pia create-dt-projects)
+# --------------------------------------------------------------------------- #
+
+
+def test_resolve_dt_missing_without_create_raises(monkeypatch):
+    monkeypatch.setattr(sync_module.requests, "get", lambda *a, **k: _resp([]))
+    with pytest.raises(click.ClickException, match="Expected exactly one root"):
+        resolve_dt_child_uuid("http://dt", "Root", "Child", "key", create=False)
+
+
+def test_resolve_dt_creates_missing_root_and_child(monkeypatch):
+    puts = []
+
+    def fake_get(*a, **k):
+        return _resp([])  # no root exists
+
+    def fake_put(url, json=None, **k):
+        puts.append((json["name"], json.get("parent")))
+        return _resp({"uuid": f"uuid-{json['name']}", "name": json["name"]})
+
+    monkeypatch.setattr(sync_module.requests, "get", fake_get)
+    monkeypatch.setattr(sync_module.requests, "put", fake_put)
+
+    uuid = resolve_dt_child_uuid("http://dt", "Root", "Child", "key", {}, create=True)
+
+    assert uuid == "uuid-Child"
+    # Root created first (no parent), then child under the new root.
+    assert puts[0] == ("Root", None)
+    assert puts[1] == ("Child", {"uuid": "uuid-Root"})
+
+
+def test_resolve_dt_creates_only_missing_child(monkeypatch):
+    puts = []
+    monkeypatch.setattr(
+        sync_module.requests,
+        "get",
+        lambda *a, **k: _resp([{"name": "Root", "uuid": "root-uuid", "children": []}]),
+    )
+
+    def fake_put(url, json=None, **k):
+        puts.append(json)
+        return _resp({"uuid": "child-uuid", "name": json["name"]})
+
+    monkeypatch.setattr(sync_module.requests, "put", fake_put)
+
+    uuid = resolve_dt_child_uuid("http://dt", "Root", "Child", "key", {}, create=True)
+
+    assert uuid == "child-uuid"
+    assert len(puts) == 1
+    assert puts[0]["parent"] == {"uuid": "root-uuid"}
+
+
+def test_resolve_dt_ambiguous_root_errors_even_with_create(monkeypatch):
+    monkeypatch.setattr(
+        sync_module.requests,
+        "get",
+        lambda *a, **k: _resp(
+            [
+                {"name": "Root", "uuid": "1", "children": []},
+                {"name": "Root", "uuid": "2", "children": []},
+            ]
+        ),
+    )
+    with pytest.raises(click.ClickException, match="Expected exactly one root"):
+        resolve_dt_child_uuid("http://dt", "Root", "Child", "key", create=True)
+
+
+def test_ensure_dt_projects_creates_missing(monkeypatch):
+    puts = []
+    monkeypatch.setattr(sync_module.requests, "get", lambda *a, **k: _resp([]))
+
+    def fake_put(url, json=None, **k):
+        puts.append(json["name"])
+        return _resp({"uuid": f"uuid-{json['name']}", "name": json["name"]})
+
+    monkeypatch.setattr(sync_module.requests, "put", fake_put)
+
+    pf = ProjectsFile(
+        projects=[
+            ProjectSpec(
+                id="p",
+                dependency_track=[DtProjectSpec(parent="Root", project="Child")],
+            )
+        ]
+    )
+    ensured = ensure_dt_projects(pf, "http://dt", "key")
+
+    assert ensured == [("Root", "Child")]
+    # Root created first (no parent), then child under the new root.
+    assert puts == ["Root", "Child"]
+
+
+def test_create_dt_projects_command_creates_missing(runner, tmp_path, monkeypatch):
+    monkeypatch.setenv("PIA_DEPENDENCY_TRACK_API_KEY", "test-key")
+    monkeypatch.setattr(sync_module.requests, "get", lambda *a, **k: _resp([]))
+    puts = []
+
+    def fake_put(url, json=None, **k):
+        puts.append(json["name"])
+        return _resp({"uuid": f"uuid-{json['name']}", "name": json["name"]})
+
+    monkeypatch.setattr(sync_module.requests, "put", fake_put)
+
+    f = _write(
+        tmp_path,
+        """
+        projects:
+          - id: eclipse-foo
+            dependency_track:
+              - parent: "Eclipse Foo"
+                project: foo-server
+        """,
+    )
+    result = runner.invoke(
+        cli_module.cli, ["create-dt-projects", f, "--dt-url", "https://dt"]
+    )
+    assert result.exit_code == 0, result.output
+    assert puts == ["Eclipse Foo", "foo-server"]
+    assert "Ensured 1" in result.output
+
+
+def test_create_dt_projects_command_requires_dt_config(runner, tmp_path, monkeypatch):
+    monkeypatch.setenv("PIA_DEPENDENCY_TRACK_API_KEY", "test-key")
+
+    def no_network(*a, **k):
+        raise AssertionError("must refuse before any network access")
+
+    monkeypatch.setattr(sync_module.requests, "get", no_network)
+    monkeypatch.setattr(sync_module.requests, "put", no_network)
+
+    f = _write(
+        tmp_path,
+        """
+        projects:
+          - id: eclipse-foo
+            dependency_track:
+              - parent: "Eclipse Foo"
+                project: foo-server
+        """,
+    )
+    # --dt-url omitted -> refuse before touching DependencyTrack.
+    result = runner.invoke(cli_module.cli, ["create-dt-projects", f])
+    assert result.exit_code != 0
+    assert "--dt-url and PIA_DEPENDENCY_TRACK_API_KEY are required" in result.output

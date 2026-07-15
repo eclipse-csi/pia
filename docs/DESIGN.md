@@ -403,6 +403,13 @@ projects:
         project: foo-server
 ```
 
+#### `pia create-dt-projects`
+
+Ensures every `(parent, project)` DependencyTrack mapping in the curated file
+exists on DependencyTrack, creating any missing root/child projects. This is a
+provisioning step only — it does **not** touch the PIA database — so run it before
+`pia sync` whenever a file introduces new DependencyTrack targets.
+
 ## 6. Security Considerations
 
 ### 6.1 Token Validation

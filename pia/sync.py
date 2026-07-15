@@ -204,41 +204,108 @@ def _dt_search_root_projects(
     return response.json()
 
 
+def _dt_create_project(
+    dt_url: str, name: str, api_key: str, parent_uuid: str | None = None
+) -> dict[str, Any]:
+    """Create a DependencyTrack project (root if ``parent_uuid`` is None)."""
+    where = f"under parent {parent_uuid}" if parent_uuid else "(root)"
+    logger.info(f"Creating DependencyTrack project {name!r} {where}")
+    body: dict[str, Any] = {"name": name}
+    if parent_uuid:
+        body["parent"] = {"uuid": parent_uuid}
+    response = requests.put(
+        f"{dt_url.rstrip('/')}/api/v1/project",
+        json=body,
+        headers={
+            "X-Api-Key": api_key,
+            "Accept": "application/json",
+            "Content-Type": "application/json",
+        },
+    )
+    response.raise_for_status()
+    return response.json()
+
+
+_missing_dt_hint = " — run `pia create-dt-projects` to provision it first"
+
+
 def resolve_dt_child_uuid(
     dt_url: str,
     parent_name: str,
     project_name: str,
     api_key: str,
     root_cache: dict[str, dict[str, Any]] | None = None,
+    create: bool = False,
 ) -> str:
     """Resolve the UUID of child ``project_name`` under root ``parent_name``.
 
     ``root_cache`` (optional) memoises root-project lookups by name so a sync that
     reuses the same DT root across many mappings issues one request per root.
 
-    The projects are only resolved, never created: a root or child that is missing
-    (or ambiguous, i.e. matched more than once) is an error.
+    When ``create`` is set (as ``pia create-dt-projects`` does), a missing root or
+    child project is created rather than raising. ``pia sync`` resolves with
+    ``create=False``, so a missing project is an error there. An *ambiguous* match
+    (more than one) is always an error, even with ``create``.
     """
+    # Resolve (or, with create, provision) the root project, caching it so other
+    # mappings that reuse this root neither re-query nor re-create it. A missing
+    # match is only tolerated when ``create`` is set; ambiguity (>1) is always an
+    # error.
     parent = root_cache.get(parent_name) if root_cache is not None else None
     if parent is None:
         roots = _dt_search_root_projects(dt_url, parent_name, api_key)
-        if len(roots) != 1:
+        if len(roots) != 1 and not (create and not roots):
+            hint = _missing_dt_hint if not roots and not create else ""
             raise click.ClickException(
                 f"Expected exactly one root DependencyTrack project named "
-                f"{parent_name!r}, found {len(roots)}"
+                f"{parent_name!r}, found {len(roots)}{hint}"
             )
-        parent = roots[0]
+        parent = roots[0] if roots else _dt_create_project(dt_url, parent_name, api_key)
         parent.setdefault("children", [])
         if root_cache is not None:
             root_cache[parent_name] = parent
 
+    # Resolve (or provision) the child under the resolved root.
     children = [c for c in parent["children"] if c.get("name") == project_name]
-    if len(children) != 1:
+    if len(children) != 1 and not (create and not children):
+        hint = _missing_dt_hint if not children and not create else ""
         raise click.ClickException(
             f"Expected exactly one child named {project_name!r} under "
-            f"{parent_name!r}, found {len(children)}"
+            f"{parent_name!r}, found {len(children)}{hint}"
         )
-    return children[0]["uuid"]
+    if children:
+        return children[0]["uuid"]
+
+    child = _dt_create_project(
+        dt_url, project_name, api_key, parent_uuid=parent["uuid"]
+    )
+    # Keep the cache consistent for other mappings that reuse this root.
+    parent["children"].append({"name": project_name, "uuid": child["uuid"]})
+    return child["uuid"]
+
+
+def ensure_dt_projects(
+    pf: ProjectsFile, dt_url: str, dt_api_key: str
+) -> list[tuple[str, str]]:
+    """Create any missing DependencyTrack projects for the file's DT mappings.
+
+    For every ``(parent, project)`` mapping in the curated file, ensure the root
+    and child project exist on DependencyTrack, creating whichever are missing.
+    This is the provisioning step behind ``pia create-dt-projects``: it touches
+    only DependencyTrack (no PIA database, no GitHub) and is idempotent — an
+    existing project is resolved, not recreated. Requires a DT API key with
+    PORTFOLIO_MANAGEMENT permission. Returns the ``(parent, project)`` pairs it
+    ensured, for reporting.
+    """
+    root_cache: dict[str, dict[str, Any]] = {}
+    ensured: list[tuple[str, str]] = []
+    for project in pf.projects:
+        for dt in project.dependency_track:
+            resolve_dt_child_uuid(
+                dt_url, dt.parent, dt.project, dt_api_key, root_cache, create=True
+            )
+            ensured.append((dt.parent, dt.project))
+    return ensured
 
 
 # --------------------------------------------------------------------------- #
@@ -274,7 +341,7 @@ def build_desired(
     Performs the external lookups (GitHub owner ids, DependencyTrack child UUIDs).
     ``dt_url`` and ``dt_api_key`` are required (the CLI validates their presence).
     DependencyTrack projects are only *resolved* here, never created: a missing one
-    raises.
+    raises, directing the operator to run ``pia create-dt-projects`` first.
     """
     desired = DB()
     owner_id_cache: dict[str, str] = {}

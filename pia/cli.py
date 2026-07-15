@@ -4,6 +4,8 @@ Subcommands
 -----------
 - sync: Reconcile all project authorizations from a curated file into the
   database (create/update/delete).
+- create-dt-projects: Create the DependencyTrack projects referenced by a curated
+  file (provisioning only; no database access).
 
 Usage Example
 -------------
@@ -11,6 +13,9 @@ Usage Example
     PIA_DEPENDENCY_TRACK_API_KEY=<API key with VIEW_PORTFOLIO permission> \
     PIA_GITHUB_TOKEN=<optional token with public read permission for rate limit> \
         uv run pia sync projects.yaml --dt-url https://sbom.eclipse.org --dry-run
+
+    PIA_DEPENDENCY_TRACK_API_KEY=<API key with PORTFOLIO_MANAGEMENT permission> \
+        uv run pia create-dt-projects projects.yaml --dt-url https://sbom.eclipse.org
 
 """
 
@@ -25,6 +30,7 @@ from .sync import (
     apply_plan,
     build_desired,
     compute_plan,
+    ensure_dt_projects,
     format_plan,
     load_projects_file,
     validate_projects_file,
@@ -132,6 +138,41 @@ def sync(
         apply_plan(session, plan)
         session.commit()
         click.echo("Applied.")
+
+
+@cli.command("create-dt-projects")
+@click.argument("file", type=click.Path(exists=True, dir_okay=False))
+@click.option(
+    "--dt-url",
+    default=None,
+    help="DependencyTrack base URL (required). This is the base, not the "
+    "/api/v1/bom upload URL.",
+)
+def create_dt_projects(file: str, dt_url: str | None) -> None:
+    """Create the DependencyTrack projects referenced by a curated FILE.
+
+    Ensures every (parent, project) DependencyTrack mapping in the file exists,
+    creating any missing root/child projects. Provisioning only — it does not touch
+    the PIA database, so run it before `pia sync` whenever a file introduces new
+    DependencyTrack targets. Idempotent: existing projects are left as-is.
+
+    Requires --dt-url and PIA_DEPENDENCY_TRACK_API_KEY (with PORTFOLIO_MANAGEMENT
+    permission to create projects).
+    """
+    pf = load_projects_file(file)
+    validate_projects_file(pf)
+
+    dt_api_key = os.environ.get("PIA_DEPENDENCY_TRACK_API_KEY")
+    if not dt_url or not dt_api_key:
+        raise click.ClickException(
+            "--dt-url and PIA_DEPENDENCY_TRACK_API_KEY are required"
+        )
+
+    ensured = ensure_dt_projects(pf, dt_url, dt_api_key)
+    click.echo(
+        f"Ensured {len(ensured)} DependencyTrack (parent, project) mapping(s) on "
+        f"{dt_url}."
+    )
 
 
 if __name__ == "__main__":
