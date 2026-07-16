@@ -570,7 +570,7 @@ def test_sync_fails_on_missing_dt_project(
     )
     result = runner.invoke(cli_module.cli, ["sync", f, "--dt-url", "https://dt"])
     assert result.exit_code != 0
-    assert "Expected exactly one root" in result.output
+    assert "Expected exactly one DependencyTrack root project" in result.output
     assert "create-dt-projects" in result.output
 
 
@@ -651,7 +651,9 @@ def test_sync_updates_and_deletions_require_allow_flag(
 
 def test_resolve_dt_missing_without_create_raises(monkeypatch):
     monkeypatch.setattr(sync_module.requests, "get", lambda *a, **k: _resp([]))
-    with pytest.raises(click.ClickException, match="Expected exactly one root"):
+    with pytest.raises(
+        click.ClickException, match="Expected exactly one DependencyTrack root project"
+    ):
         resolve_dt_child_uuid("http://dt", "Root", "Child", "key", create=False)
 
 
@@ -708,7 +710,9 @@ def test_resolve_dt_ambiguous_root_errors_even_with_create(monkeypatch):
             ]
         ),
     )
-    with pytest.raises(click.ClickException, match="Expected exactly one root"):
+    with pytest.raises(
+        click.ClickException, match="Expected exactly one DependencyTrack root project"
+    ):
         resolve_dt_child_uuid("http://dt", "Root", "Child", "key", create=True)
 
 

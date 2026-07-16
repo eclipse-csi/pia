@@ -20,6 +20,7 @@ its instance URL; PIA appends ``/oidc`` to derive the OIDC issuer:
 """
 
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 from urllib.parse import urlparse
@@ -230,6 +231,23 @@ def _dt_create_project(
 _missing_dt_hint = " — run `pia create-dt-projects` to provision it first"
 
 
+def _resolve_one_or_create(
+    matches: list[dict[str, Any]],
+    msg: str,
+    create: bool,
+    factory: Callable[[], dict[str, Any]],
+) -> dict[str, Any]:
+    """Pick the single match, create one, or raise on a missing/ambiguous match."""
+    if len(matches) == 1:
+        return matches[0]
+    if create and not matches:
+        return factory()
+    hint = _missing_dt_hint if not matches and not create else ""
+    raise click.ClickException(
+        f"Expected exactly one DependencyTrack {msg}, found {len(matches)}{hint}"
+    )
+
+
 def resolve_dt_child_uuid(
     dt_url: str,
     parent_name: str,
@@ -240,48 +258,36 @@ def resolve_dt_child_uuid(
 ) -> str:
     """Resolve the UUID of child ``project_name`` under root ``parent_name``.
 
-    ``root_cache`` (optional) memoises root-project lookups by name so a sync that
-    reuses the same DT root across many mappings issues one request per root.
-
-    When ``create`` is set (as ``pia create-dt-projects`` does), a missing root or
-    child project is created rather than raising. ``pia sync`` resolves with
-    ``create=False``, so a missing project is an error there. An *ambiguous* match
-    (more than one) is always an error, even with ``create``.
+    ``root_cache`` memoises root-project lookups by name so a sync that reuses the
+    same DT root across many mappings issues one request per root; pass ``None``
+    for a one-off lookup. When ``create`` is set, a missing root or child project
+    is created rather than raising; an *ambiguous* match is always an error.
     """
-    # Resolve (or, with create, provision) the root project, caching it so other
-    # mappings that reuse this root neither re-query nor re-create it. A missing
-    # match is only tolerated when ``create`` is set; ambiguity (>1) is always an
-    # error.
-    parent = root_cache.get(parent_name) if root_cache is not None else None
+    if root_cache is None:
+        root_cache = {}
+
+    parent = root_cache.get(parent_name)
     if parent is None:
-        roots = _dt_search_root_projects(dt_url, parent_name, api_key)
-        if len(roots) != 1 and not (create and not roots):
-            hint = _missing_dt_hint if not roots and not create else ""
-            raise click.ClickException(
-                f"Expected exactly one root DependencyTrack project named "
-                f"{parent_name!r}, found {len(roots)}{hint}"
-            )
-        parent = roots[0] if roots else _dt_create_project(dt_url, parent_name, api_key)
-        parent.setdefault("children", [])
-        if root_cache is not None:
-            root_cache[parent_name] = parent
-
-    # Resolve (or provision) the child under the resolved root.
-    children = [c for c in parent["children"] if c.get("name") == project_name]
-    if len(children) != 1 and not (create and not children):
-        hint = _missing_dt_hint if not children and not create else ""
-        raise click.ClickException(
-            f"Expected exactly one child named {project_name!r} under "
-            f"{parent_name!r}, found {len(children)}{hint}"
+        parents = _dt_search_root_projects(dt_url, parent_name, api_key)
+        parent = _resolve_one_or_create(
+            parents,
+            f"root project named {parent_name!r}",
+            create,
+            lambda: _dt_create_project(dt_url, parent_name, api_key),
         )
-    if children:
-        return children[0]["uuid"]
+        parent.setdefault("children", [])
+        root_cache[parent_name] = parent
 
-    child = _dt_create_project(
-        dt_url, project_name, api_key, parent_uuid=parent["uuid"]
+    children = [c for c in parent["children"] if c.get("name") == project_name]
+    child = _resolve_one_or_create(
+        children,
+        f"child project {project_name!r} under root project {parent_name!r}",
+        create,
+        lambda: _dt_create_project(dt_url, project_name, api_key, parent["uuid"]),
     )
-    # Keep the cache consistent for other mappings that reuse this root.
-    parent["children"].append({"name": project_name, "uuid": child["uuid"]})
+    if child not in parent["children"]:
+        # Update cache with newly created child
+        parent["children"].append(child)
     return child["uuid"]
 
 
