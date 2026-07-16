@@ -43,7 +43,6 @@ from .models import (
 
 logger = logging.getLogger(__name__)
 
-
 # --------------------------------------------------------------------------- #
 # Curated-file model
 # --------------------------------------------------------------------------- #
@@ -170,6 +169,8 @@ def validate_projects_file(pf: ProjectsFile) -> None:
 # Resolution (external lookups)
 # --------------------------------------------------------------------------- #
 
+JSON_TYPE = "application/json"
+
 
 def fetch_github_owner_id(owner: str, token: str | None = None) -> str:
     """Resolve a GitHub owner login to its numeric id.
@@ -198,7 +199,7 @@ def _dt_search_root_projects(
     response = requests.get(
         url,
         params={"name": name, "onlyRoot": "true"},
-        headers={"X-Api-Key": api_key, "Accept": "application/json"},
+        headers={"X-Api-Key": api_key, "Accept": JSON_TYPE},
     )
     response.raise_for_status()
     return response.json()
@@ -218,8 +219,8 @@ def _dt_create_project(
         json=body,
         headers={
             "X-Api-Key": api_key,
-            "Accept": "application/json",
-            "Content-Type": "application/json",
+            "Accept": JSON_TYPE,
+            "Content-Type": JSON_TYPE,
         },
     )
     response.raise_for_status()
