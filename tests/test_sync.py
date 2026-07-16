@@ -77,10 +77,11 @@ def test_classify_workload_url():
 
 
 def test_reject_empty_file(tmp_path):
+    f = _write(tmp_path, "")
     # A truncated/blank file parses to nothing; it must not validate as "0
     # projects" and go on to delete every authorization.
     with pytest.raises(click.ClickException, match="Invalid projects file"):
-        load_projects_file(_write(tmp_path, ""))
+        load_projects_file(f)
 
 
 def test_load_and_validate_ok(tmp_path):
@@ -654,7 +655,7 @@ def test_resolve_dt_missing_without_create_raises(monkeypatch):
     with pytest.raises(
         click.ClickException, match="Expected exactly one DependencyTrack root project"
     ):
-        resolve_dt_child_uuid("http://dt", "Root", "Child", "key", create=False)
+        resolve_dt_child_uuid("https://dt", "Root", "Child", "key", create=False)
 
 
 def test_resolve_dt_creates_missing_root_and_child(monkeypatch):
@@ -670,7 +671,7 @@ def test_resolve_dt_creates_missing_root_and_child(monkeypatch):
     monkeypatch.setattr(sync_module.requests, "get", fake_get)
     monkeypatch.setattr(sync_module.requests, "put", fake_put)
 
-    uuid = resolve_dt_child_uuid("http://dt", "Root", "Child", "key", {}, create=True)
+    uuid = resolve_dt_child_uuid("https://dt", "Root", "Child", "key", {}, create=True)
 
     assert uuid == "uuid-Child"
     # Root created first (no parent), then child under the new root.
@@ -692,7 +693,7 @@ def test_resolve_dt_creates_only_missing_child(monkeypatch):
 
     monkeypatch.setattr(sync_module.requests, "put", fake_put)
 
-    uuid = resolve_dt_child_uuid("http://dt", "Root", "Child", "key", {}, create=True)
+    uuid = resolve_dt_child_uuid("https://dt", "Root", "Child", "key", {}, create=True)
 
     assert uuid == "child-uuid"
     assert len(puts) == 1
@@ -713,7 +714,7 @@ def test_resolve_dt_ambiguous_root_errors_even_with_create(monkeypatch):
     with pytest.raises(
         click.ClickException, match="Expected exactly one DependencyTrack root project"
     ):
-        resolve_dt_child_uuid("http://dt", "Root", "Child", "key", create=True)
+        resolve_dt_child_uuid("https://dt", "Root", "Child", "key", create=True)
 
 
 def test_ensure_dt_projects_creates_missing(monkeypatch):
@@ -734,7 +735,7 @@ def test_ensure_dt_projects_creates_missing(monkeypatch):
             )
         ]
     )
-    ensured = ensure_dt_projects(pf, "http://dt", "key")
+    ensured = ensure_dt_projects(pf, "https://dt", "key")
 
     assert ensured == [("Root", "Child")]
     # Root created first (no parent), then child under the new root.
