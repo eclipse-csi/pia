@@ -43,7 +43,11 @@ class EclipseFoundationProject(Base):
 
     # `Mapped[str]` is the type annotation SQLAlchemy reads to infer the column
     # type and nullability; `mapped_column(...)` provides runtime column options.
-    # Here the PK is the Eclipse project identifier itself.
+    #
+    # The PK is the Eclipse project identifier itself. It is the authorization
+    # scope: every workload and DependencyTrack row is anchored to one project
+    # via its `ef_project_id` foreign key. Uniqueness is implicit through the
+    # single column.
     id: Mapped[str] = mapped_column(String, primary_key=True)
 
 
@@ -80,6 +84,11 @@ class Workload(Base):
         "polymorphic_on": "type",
     }
 
+    # Uniqueness constraint: A workload identity is globally unique and maps to
+    # exactly one EF project. Mapping a workload to multiple EF projects is
+    # possible, but would require a model and auth flow re-design. See
+    # subclasses for constraint definitions.
+
 
 class GitHubWorkload(Workload):
     """GitHub Actions workload. Issuer is always GITHUB_ISSUER."""
@@ -91,7 +100,7 @@ class GitHubWorkload(Workload):
     repo_owner: Mapped[str] = mapped_column(String)
     repo_owner_id: Mapped[str] = mapped_column(String)
 
-    # Multi-column uniqueness constraint
+    # See parent class for details about the uniqueness constraint.
     __table_args__ = (UniqueConstraint("repo_name", "repo_owner", "repo_owner_id"),)
 
     __mapper_args__ = {
@@ -105,7 +114,8 @@ class JenkinsWorkload(Workload):
     __tablename__ = "jenkins_workloads"
 
     id: Mapped[int] = mapped_column(ForeignKey("workloads.id"), primary_key=True)
-    # Single-column uniqueness constraint
+
+    # See parent class for details about the uniqueness constraint.
     issuer: Mapped[str] = mapped_column(String, unique=True)
 
     __mapper_args__ = {
@@ -128,7 +138,18 @@ class DependencyTrackProject(Base):
     name: Mapped[str] = mapped_column(String)
     parent_uuid: Mapped[str] = mapped_column(String)
 
-    __table_args__ = (UniqueConstraint("name", "parent_uuid"),)
+    __table_args__ = (
+        # DependencyTrack targets (product name plus uuid) are globally unique
+        # and map to exactly one EF project. Keeping it globally unique stops
+        # two EF projects from pointing at the same DT target, so an upload
+        # authorized for one project can never reach another's DT project.
+        UniqueConstraint("name", "parent_uuid"),
+        # DependencyTrack target names (product name) are unique within an EF
+        # project to avoid ambiguity when resolving the target based on the
+        # name in the upload payload. They are not globally unique, to allow
+        # different EF projects to e.g. upload a product named "cli" or "server".
+        UniqueConstraint("ef_project_id", "name"),
+    )
 
 
 def is_issuer_known(issuer: str) -> bool:
