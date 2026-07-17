@@ -76,4 +76,4 @@ Use `pia create-dt-projects` to ensure existence of DependencyTrack targets
 prior to syncing.
 
 See [CLI section of the design doc](docs/DESIGN.md#55-cli-tool) or run with
-`--help` for more infos.
+`--help` for more info.
