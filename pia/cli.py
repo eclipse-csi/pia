@@ -151,7 +151,7 @@ def sync(
 def create_dt_projects(file: str, dt_url: str | None) -> None:
     """Create the DependencyTrack projects referenced by a curated FILE.
 
-    Ensures every (parent, project) DependencyTrack mapping in the file exists,
+    Ensures every (project, product) DependencyTrack mapping in the file exists,
     creating any missing root/child projects. Provisioning only — it does not touch
     the PIA database, so run it before `pia sync` whenever a file introduces new
     DependencyTrack targets. Idempotent: existing projects are left as-is.
@@ -170,7 +170,7 @@ def create_dt_projects(file: str, dt_url: str | None) -> None:
 
     ensured = ensure_dt_projects(pf, dt_url, dt_api_key)
     click.echo(
-        f"Ensured {len(ensured)} DependencyTrack (parent, project) mapping(s) on "
+        f"Ensured {len(ensured)} DependencyTrack (project, product) mapping(s) on "
         f"{dt_url}."
     )
 

@@ -94,8 +94,8 @@ def test_load_and_validate_ok(tmp_path):
               - https://github.com/eclipse-foo/repo
               - https://ci.eclipse.org/foo
             dependency_track:
-              - parent: "Eclipse Foo"
-                project: foo-server
+              - project: "Eclipse Foo"
+                product: foo-server
         """,
     )
     pf = load_projects_file(f)
@@ -185,7 +185,7 @@ def test_build_desired_derives_jenkins_issuer():
 
 def test_validate_rejects_cross_project_dt_mapping(tmp_path):
     # The DB uniqueness on DependencyTrackProject is (name, parent_uuid) with no
-    # ef_project_id, so the same (parent, project) target under two EF projects
+    # ef_project_id, so the same (project, product) target under two EF projects
     # would collide on apply. Validation must reject it up front.
     pf = load_projects_file(
         _write(
@@ -194,12 +194,12 @@ def test_validate_rejects_cross_project_dt_mapping(tmp_path):
             projects:
               - id: a
                 dependency_track:
-                  - parent: "Eclipse Foo"
-                    project: shared
+                  - project: "Eclipse Foo"
+                    product: shared
               - id: b
                 dependency_track:
-                  - parent: "Eclipse Foo"
-                    project: shared
+                  - project: "Eclipse Foo"
+                    product: shared
             """,
         )
     )
@@ -207,9 +207,9 @@ def test_validate_rejects_cross_project_dt_mapping(tmp_path):
         validate_projects_file(pf)
 
 
-def test_validate_allows_same_dt_name_under_different_parents(tmp_path):
-    # Same child name but distinct parents resolves to distinct (name, parent_uuid)
-    # pairs, so it must not be rejected as a cross-project collision.
+def test_validate_allows_same_dt_product_under_different_projects(tmp_path):
+    # Same product name but distinct projects resolves to distinct (name,
+    # parent_uuid) pairs, so it must not be rejected as a cross-project collision.
     pf = load_projects_file(
         _write(
             tmp_path,
@@ -217,12 +217,12 @@ def test_validate_allows_same_dt_name_under_different_parents(tmp_path):
             projects:
               - id: a
                 dependency_track:
-                  - parent: "Eclipse Foo"
-                    project: shared
+                  - project: "Eclipse Foo"
+                    product: shared
               - id: b
                 dependency_track:
-                  - parent: "Eclipse Bar"
-                    project: shared
+                  - project: "Eclipse Bar"
+                    product: shared
             """,
         )
     )
@@ -471,7 +471,7 @@ def patch_cli(session_factory, monkeypatch):
     monkeypatch.setattr(
         sync_module,
         "resolve_dt_child_uuid",
-        lambda dt_url, parent, project, api_key, root_cache=None, create=False: (
+        lambda dt_url, project, product, api_key, root_cache=None, create=False: (
             "uuid-1"
         ),
     )
@@ -525,8 +525,8 @@ def test_sync_dry_run_writes_nothing(runner, tmp_path, session_factory, patch_cl
           - id: eclipse-foo
             workloads: ["https://github.com/eclipse-foo/repo"]
             dependency_track:
-              - parent: "Eclipse Foo"
-                project: foo-server
+              - project: "Eclipse Foo"
+                product: foo-server
         """,
     )
     result = runner.invoke(
@@ -565,8 +565,8 @@ def test_sync_fails_on_missing_dt_project(
         projects:
           - id: eclipse-foo
             dependency_track:
-              - parent: "Eclipse Foo"
-                project: foo-server
+              - project: "Eclipse Foo"
+                product: foo-server
         """,
     )
     result = runner.invoke(cli_module.cli, ["sync", f, "--dt-url", "https://dt"])
@@ -583,8 +583,8 @@ def test_sync_apply_creates_rows(runner, tmp_path, session_factory, patch_cli):
           - id: eclipse-foo
             workloads: ["https://github.com/eclipse-foo/repo"]
             dependency_track:
-              - parent: "Eclipse Foo"
-                project: foo-server
+              - project: "Eclipse Foo"
+                product: foo-server
         """,
     )
     result = runner.invoke(cli_module.cli, ["sync", f, "--dt-url", "https://dt"])
@@ -731,7 +731,7 @@ def test_ensure_dt_projects_creates_missing(monkeypatch):
         projects=[
             ProjectSpec(
                 id="p",
-                dependency_track=[DtProjectSpec(parent="Root", project="Child")],
+                dependency_track=[DtProjectSpec(project="Root", product="Child")],
             )
         ]
     )
@@ -759,8 +759,8 @@ def test_create_dt_projects_command_creates_missing(runner, tmp_path, monkeypatc
         projects:
           - id: eclipse-foo
             dependency_track:
-              - parent: "Eclipse Foo"
-                project: foo-server
+              - project: "Eclipse Foo"
+                product: foo-server
         """,
     )
     result = runner.invoke(
@@ -786,8 +786,8 @@ def test_create_dt_projects_command_requires_dt_config(runner, tmp_path, monkeyp
         projects:
           - id: eclipse-foo
             dependency_track:
-              - parent: "Eclipse Foo"
-                project: foo-server
+              - project: "Eclipse Foo"
+                product: foo-server
         """,
     )
     # --dt-url omitted -> refuse before touching DependencyTrack.

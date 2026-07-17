@@ -385,7 +385,7 @@ using the `PIA_DATABASE_URL` environment variable, e.g.
 Reconciles the whole authorization state to match a curated projects file. The
 file lists Eclipse Foundation projects, each with a flat list of workload URLs
 (GitHub repo or Jenkins instance URL — classified by host) and a list of
-DependencyTrack `(parent, project)` mappings. `sync` resolves the external
+DependencyTrack `(project, product)` mappings. `sync` resolves the external
 data (GitHub owner ids, DependencyTrack child UUIDs), diffs the desired state
 against the database, prints a plan, and applies it so the database matches the
 file.
@@ -399,13 +399,13 @@ projects:
       - https://github.com/eclipse-foo/repo
       - https://ci.eclipse.org/foo
     dependency_track:
-      - parent: "Eclipse Foo"
-        project: foo-server
+      - project: "Eclipse Foo"
+        product: foo-server
 ```
 
 #### `pia create-dt-projects`
 
-Ensures every `(parent, project)` DependencyTrack mapping in the curated file
+Ensures every `(project, product)` DependencyTrack mapping in the curated file
 exists on DependencyTrack, creating any missing root/child projects. This is a
 provisioning step only — it does **not** touch the PIA database — so run it before
 `pia sync` whenever a file introduces new DependencyTrack targets.
