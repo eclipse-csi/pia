@@ -130,7 +130,7 @@ class GitHubWorkload(Workload):
     def __repr__(self) -> str:
         # extra space is intentional to align with other models
         return (
-            f"Github Workload  (project: {self.ef_project_id}, "
+            f"GitHub Workload  (project: {self.ef_project_id}, "
             f"repo: {self.repo_owner}/{self.repo_name}, owner id: {self.repo_owner_id})"
         )
 
