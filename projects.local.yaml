@@ -1,0 +1,10 @@
+# Example curated file for trying `pia sync` against the local docker-compose
+# stack (see README "Local Testing").
+projects:
+  - id: eclipse-csi
+    workloads:
+      - https://github.com/eclipse-csi/pia
+    dependency_track:
+      - project: "Eclipse CSI"
+        product: pia
+        product: otterdog

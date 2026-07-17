@@ -90,3 +90,29 @@ prior to syncing.
 
 See [CLI section of the design doc](docs/DESIGN.md#55-cli-tool) or run with
 `--help` for more info.
+
+#### Local Testing
+
+The `docker compose` stack includes a local DependencyTrack API server, so you
+can exercise `pia sync` end to end.
+
+1. **Start the stack.** This brings up Postgres, DependencyTrack, and the app
+   (which applies migrations on startup):
+   ```shell
+   docker compose up -d
+   ```
+
+2. **Provision a DependencyTrack token.** DependencyTrack takes 1-2 minutes to
+   become ready on first start; this command waits for it and creates an API
+   token:
+   ```shell
+   uv run python scripts/dt_bootstrap.py
+   ```
+   The DependencyTrack UI/API is at http://localhost:8080 (admin login is
+   printed by the command).
+
+3. **Run a sync** against the local database and DependencyTrack using the
+   command printed by `scripts/dt_bootstrap.py`.
+
+   Drop `--dry-run` to apply, then re-run to see an empty (idempotent) plan.
+   Edit `projects.local.yaml` and re-run to see updates and deletions in the plan.
