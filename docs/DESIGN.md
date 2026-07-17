@@ -245,6 +245,8 @@ An Eclipse Foundation project. Groups workloads and DependencyTrack projects.
 Uses the Eclipse project identifier directly as primary key. Foreign keys
 referencing this table use `ON UPDATE CASCADE` to propagate project ID changes.
 
+**Uniqueness:** `PRIMARY KEY(id)`.
+
 | Column | Type | Notes |
 |--------|------|-------|
 | `id` | String PK | Eclipse project identifier (e.g. `technology.foo`) |
@@ -263,6 +265,8 @@ A CI/CD entity that can upload SBOMs. Uses joined-table inheritance with a
 Issuer is always `https://token.actions.githubusercontent.com` (constant, not
 stored).
 
+**Uniqueness:** `UNIQUE(repo_name, repo_owner, repo_owner_id)`
+
 | Column | Type | Notes |
 |--------|------|-------|
 | `id` | FK → workloads.id | |
@@ -273,6 +277,8 @@ stored).
 #### JenkinsWorkload (extends Workload)
 Each Jenkins workload has a distinct issuer URL.
 
+**Uniqueness:** `UNIQUE(issuer)`
+
 | Column | Type | Notes |
 |--------|------|-------|
 | `id` | FK → workloads.id | |
@@ -280,6 +286,10 @@ Each Jenkins workload has a distinct issuer URL.
 
 #### DependencyTrackProject
 A DependencyTrack target for SBOM uploads.
+
+**Uniqueness:**
+- `UNIQUE(ef_project_id, name)`
+- `UNIQUE(name, parent_uuid)`
 
 | Column | Type | Notes |
 |--------|------|-------|
@@ -294,6 +304,13 @@ The Eclipse Foundation project id is the authorization boundary. Any workload
 can upload SBOMs for any DependencyTrack project that shares the same Eclipse
 Foundation project id.
 
+A workload identity — a GitHub repository (`repo_owner`, `repo_name`,
+`repo_owner_id`) or a Jenkins `issuer` — belongs to **exactly one** Eclipse
+Foundation project. This is enforced by the workload uniqueness constraints.
+Within that scope the target DependencyTrack project is selected by
+`product_name`, and `UNIQUE(ef_project_id, name)` makes that selection
+unambiguous, while `UNIQUE(name, parent_uuid)` keeps each physical DependencyTrack
+project bound to a single EF project.
 
 ## 5. Implementation Details
 

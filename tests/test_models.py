@@ -2,8 +2,10 @@
 
 import pytest
 from pydantic import ValidationError
+from sqlalchemy.exc import IntegrityError
 
 from pia.models import (
+    DependencyTrackProject,
     DependencyTrackUploadPayload,
     GitHubWorkload,
     JenkinsWorkload,
@@ -172,6 +174,54 @@ class TestFindDtProject:
     def test_wrong_name(self, seed_db):
         dt_project = find_dt_project(seed_db, "eclipse-test", "no-such-product")
         assert dt_project is None
+
+
+class TestDependencyTrackProjectUniqueness:
+    """The two DependencyTrackProject uniqueness constraints (see models.py).
+
+    seed_db already holds (eclipse-test, test-product, uuid-1) and
+    (eclipse-other, other-product, uuid-2), with both EF projects committed.
+    """
+
+    def test_name_unique_within_ef_project(self, seed_db):
+        # UNIQUE(ef_project_id, name): a second 'test-product' under eclipse-test
+        # is rejected, so find_dt_project resolves a product_name unambiguously.
+        seed_db.add(
+            DependencyTrackProject(
+                ef_project_id="eclipse-test", name="test-product", parent_uuid="uuid-x"
+            )
+        )
+        with pytest.raises(IntegrityError):
+            seed_db.commit()
+
+    def test_same_name_allowed_across_ef_projects(self, seed_db):
+        # UNIQUE(ef_project_id, name) is scoped by project: the same name under a
+        # different EF project (and a different target) is allowed.
+        seed_db.add(
+            DependencyTrackProject(
+                ef_project_id="eclipse-other", name="test-product", parent_uuid="uuid-x"
+            )
+        )
+        seed_db.commit()  # no IntegrityError
+        assert find_dt_project(seed_db, "eclipse-test", "test-product").parent_uuid == (
+            "uuid-1"
+        )
+        assert (
+            find_dt_project(seed_db, "eclipse-other", "test-product").parent_uuid
+            == "uuid-x"
+        )
+
+    def test_same_name_and_parent_rejected_across_ef_projects(self, seed_db):
+        # UNIQUE(name, parent_uuid) is global: even under a different EF project,
+        # reusing the same physical target (name, parent_uuid) is rejected, so two
+        # projects can never point at the same DependencyTrack project.
+        seed_db.add(
+            DependencyTrackProject(
+                ef_project_id="eclipse-other", name="test-product", parent_uuid="uuid-1"
+            )
+        )
+        with pytest.raises(IntegrityError):
+            seed_db.commit()
 
 
 class TestUploadSBOMPayload:
