@@ -10,7 +10,7 @@ services:
       - PIA_DEPENDENCY_TRACK_API_KEY=${PIA_DEPENDENCY_TRACK_API_KEY:-test-api-key}
       - PIA_DATABASE_URL=postgresql://pia:pia@postgres:5432/pia
       - PIA_EXPECTED_AUDIENCE=${PIA_EXPECTED_AUDIENCE:-pia.eclipse.org}
-      - PIA_DEPENDENCY_TRACK_URL=${PIA_DEPENDENCY_TRACK_URL:-https://sbom.eclipse.org/api/v1/bom}
+      - PIA_DEPENDENCY_TRACK_URL=${PIA_DEPENDENCY_TRACK_URL:-http://dtrack:8080/api/v1/bom}
     volumes:
       - ./pia:/app/pia:ro
       - ./pyproject.toml:/app/pyproject.toml:ro
@@ -20,6 +20,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      dtrack:
+        condition: service_started
     # Dev-only convenience: apply migrations, then start the app with --reload
     # for hot-reloading of the mounted code. In production migrations are run as
     # a separate step (a Helm pre-upgrade hook job), not on app startup, so the
@@ -42,5 +44,24 @@ services:
       timeout: 5s
       retries: 5
 
+  # Local DependencyTrack API server for trying the app and `pia sync` end to
+  # end. Uses the bundled embedded database (data persisted in the dtrack-data
+  # volume) — no external Postgres wiring needed for local use. It takes 1-2
+  # minutes to become ready on first start; `scripts/dt_bootstrap` waits for
+  # it, then provisions an API token. The web UI (frontend) is not included;
+  # the REST API is served on port 8080.
+  dtrack:
+    image: dependencytrack/apiserver:4.12.7
+    container_name: pia-dtrack
+    ports:
+      - "8080:8080"
+    environment:
+      # DependencyTrack hard-requires a 4GB heap and refuses to start with less.
+      # Ensure Docker has at least ~4-5GB of memory available.
+      - EXTRA_JAVA_OPTIONS=-Xmx4g
+    volumes:
+      - dtrack-data:/data
+
 volumes:
   pia-postgres-data:
+  dtrack-data:
