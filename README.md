@@ -1,5 +1,18 @@
 # Project Identity Authority (PIA)
-Authenticates Eclipse Foundation projects using OpenID Connect (OIDC).
+Authenticates Eclipse Foundation projects using OpenID Connect (OIDC) for the
+purpose of uploading SBOMs to the Eclipse Foundation DependencyTrack instance.
+
+> [!IMPORTANT]
+> **Authorization is scoped to the Eclipse Foundation project — not to an
+> individual workload or DependencyTrack project.** Workloads (GitHub repos or
+> Jenkins instances) and DependencyTrack projects are both registered *under* an EF
+> project. Any workload registered for an EF project may publish an SBOM to **any**
+> DependencyTrack project registered for that **same** EF project; there is no
+> per-workload → per-DependencyTrack-project binding. Which DependencyTrack project
+> a given upload lands in is decided at upload time by the **`product_name`** field
+> in the request payload: PIA resolves it to the DependencyTrack project. In
+> other words, the workload authenticates and establishes the EF-project scope, and
+> `product_name` selects the target within that scope.
 
 See [Design Document](docs/DESIGN.md) for details.
 
