@@ -65,3 +65,15 @@ version control.
 ```shell
 docker compose run --rm pia alembic revision --autogenerate --message "MESSAGE"
 ```
+
+### Managing Authorizations
+
+Project authorizations (workloads and DependencyTrack targets) live in the
+database and are managed declaratively: reconcile the whole set from a curated
+file with `pia sync`.
+
+Use `pia create-dt-projects` to ensure existence of DependencyTrack targets
+prior to syncing.
+
+See [CLI section of the design doc](docs/DESIGN.md#55-cli-tool) or run with
+`--help` for more info.
