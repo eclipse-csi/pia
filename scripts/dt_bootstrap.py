@@ -24,7 +24,7 @@ DEFAULT_PASSWORD = "admin"
 # Local-dev only: DependencyTrack from docker-compose is disposable and never
 # exposed. Hard-coded (not env-configurable) to keep the local scope unambiguous;
 # stable so re-runs can log back in.
-NEW_PASSWORD = "PiaLocal123!"
+NEW_PASSWORD = "PiaLocal123!"  # NOSONAR
 TEAM_NAME = "pia-local"
 # Permissions needed by `pia sync` (VIEW_PORTFOLIO to query projects) and by the
 # PIA app when uploading SBOMs against this local instance.
