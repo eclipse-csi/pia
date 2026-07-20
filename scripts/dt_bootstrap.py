@@ -8,20 +8,23 @@ PIA app and `pia sync` need and generates and prints an API token.
 Usage:
     uv run python scripts/dt_bootstrap.py
 
-Environment overrides: DT_URL (default http://localhost:8080),
-DT_ADMIN_PASSWORD (default set below).
+Targets the local docker-compose DependencyTrack only; the URL and admin
+credentials are hard-coded for that disposable instance.
 """
 
-import os
 import sys
 import time
 
 import requests
 
-DT_URL = os.environ.get("DT_URL", "http://localhost:8080").rstrip("/")
+DT_URL = "http://localhost:8080"
 ADMIN_USER = "admin"
 DEFAULT_PASSWORD = "admin"
-NEW_PASSWORD = os.environ.get("DT_ADMIN_PASSWORD", "PiaLocal123!")
+
+# Local-dev only: DependencyTrack from docker-compose is disposable and never
+# exposed. Hard-coded (not env-configurable) to keep the local scope unambiguous;
+# stable so re-runs can log back in.
+NEW_PASSWORD = "PiaLocal123!"
 TEAM_NAME = "pia-local"
 # Permissions needed by `pia sync` (VIEW_PORTFOLIO to query projects) and by the
 # PIA app when uploading SBOMs against this local instance.
@@ -85,8 +88,9 @@ def ensure_admin_password() -> str:
     if r.status_code not in (200, 204):
         sys.exit(
             "Could not change the admin password "
-            f"(HTTP {r.status_code}: {r.text!r}). If you set a custom password "
-            "before, pass it via DT_ADMIN_PASSWORD."
+            f"(HTTP {r.status_code}: {r.text!r}). If the local DependencyTrack "
+            "already has a non-default password, reset it with "
+            "`docker compose down -v` and re-run."
         )
     token = login(NEW_PASSWORD)
     if not token:
