@@ -665,7 +665,7 @@ def test_resolve_dt_creates_missing_root_and_child(monkeypatch):
         return _resp([])  # no root exists
 
     def fake_put(url, json=None, **k):
-        puts.append((json["name"], json.get("parent")))
+        puts.append(json)
         return _resp({"uuid": f"uuid-{json['name']}", "name": json["name"]})
 
     monkeypatch.setattr(sync_module.requests, "get", fake_get)
@@ -675,8 +675,12 @@ def test_resolve_dt_creates_missing_root_and_child(monkeypatch):
 
     assert uuid == "uuid-Child"
     # Root created first (no parent), then child under the new root.
-    assert puts[0] == ("Root", None)
-    assert puts[1] == ("Child", {"uuid": "uuid-Root"})
+    assert puts[0]["name"] == "Root"
+    assert "parent" not in puts[0]
+    assert puts[0]["collectionLogic"] == "AGGREGATE_DIRECT_CHILDREN"
+    assert puts[1]["name"] == "Child"
+    assert puts[1]["parent"] == {"uuid": "uuid-Root"}
+    assert puts[1]["collectionLogic"] == "AGGREGATE_LATEST_VERSION_CHILDREN"
 
 
 def test_resolve_dt_creates_only_missing_child(monkeypatch):
@@ -698,6 +702,7 @@ def test_resolve_dt_creates_only_missing_child(monkeypatch):
     assert uuid == "child-uuid"
     assert len(puts) == 1
     assert puts[0]["parent"] == {"uuid": "root-uuid"}
+    assert puts[0]["collectionLogic"] == "AGGREGATE_LATEST_VERSION_CHILDREN"
 
 
 def test_resolve_dt_ambiguous_root_errors_even_with_create(monkeypatch):
