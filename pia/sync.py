@@ -214,12 +214,19 @@ def _dt_search_root_projects(
 def _dt_create_project(
     dt_url: str, name: str, api_key: str, parent_uuid: str | None = None
 ) -> dict[str, Any]:
-    """Create a DependencyTrack project (root if ``parent_uuid`` is None)."""
+    """Create a DependencyTrack project (root if ``parent_uuid`` is None).
+
+    Root projects aggregate their direct children; non-root aggregate direct
+    children marked as latest.
+    """
     where = f"under parent {parent_uuid}" if parent_uuid else "(root)"
     logger.info(f"Creating DependencyTrack project {name!r} {where}")
     body: dict[str, Any] = {"name": name}
     if parent_uuid:
         body["parent"] = {"uuid": parent_uuid}
+        body["collectionLogic"] = "AGGREGATE_LATEST_VERSION_CHILDREN"
+    else:
+        body["collectionLogic"] = "AGGREGATE_DIRECT_CHILDREN"
     response = requests.put(
         f"{dt_url.rstrip('/')}/api/v1/project",
         json=body,
