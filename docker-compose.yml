@@ -51,7 +51,7 @@ services:
   # it, then provisions an API token. The web UI (frontend) is not included;
   # the REST API is served on port 8080.
   dtrack:
-    image: dependencytrack/apiserver:4.12.7
+    image: dependencytrack/apiserver:4.14.0
     container_name: pia-dtrack
     ports:
       - "8080:8080"
