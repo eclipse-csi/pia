@@ -287,9 +287,9 @@ Each Jenkins workload has a distinct issuer URL.
 #### DependencyTrackProject
 A DependencyTrack target for SBOM uploads.
 
-**Uniqueness:**
-- `UNIQUE(ef_project_id, name)`
-- `UNIQUE(name, parent_uuid)`
+**Uniqueness:** `UNIQUE(name)` — DependencyTrack requires globally unique
+projects by `(name, version)`. PIA DB does not store versions, so the name alone
+must be globally unique.
 
 | Column | Type | Notes |
 |--------|------|-------|
@@ -308,9 +308,9 @@ A workload identity — a GitHub repository (`repo_owner`, `repo_name`,
 `repo_owner_id`) or a Jenkins `issuer` — belongs to **exactly one** Eclipse
 Foundation project. This is enforced by the workload uniqueness constraints.
 Within that scope the target DependencyTrack project is selected by
-`product_name`, and `UNIQUE(ef_project_id, name)` makes that selection
-unambiguous, while `UNIQUE(name, parent_uuid)` keeps each physical DependencyTrack
-project bound to a single EF project.
+`product_name` in the upload payload, and the DependencyTrack project global
+uniqueness constraint makes that selection unambiguous and binds each
+DependencyTrack project to exactly one Eclipse Foundation project.
 
 ## 5. Implementation Details
 

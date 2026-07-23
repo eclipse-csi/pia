@@ -186,21 +186,14 @@ class DependencyTrackProject(Base):
             onupdate="CASCADE",
         ),
     )
-    name: Mapped[str] = mapped_column(String)
-    parent_uuid: Mapped[str] = mapped_column(String)
 
-    __table_args__ = (
-        # DependencyTrack targets (product name plus uuid) are globally unique
-        # and map to exactly one EF project. Keeping it globally unique stops
-        # two EF projects from pointing at the same DT target, so an upload
-        # authorized for one project can never reach another's DT project.
-        UniqueConstraint("name", "parent_uuid"),
-        # DependencyTrack target names (product name) are unique within an EF
-        # project to avoid ambiguity when resolving the target based on the
-        # name in the upload payload. They are not globally unique, to allow
-        # different EF projects to e.g. upload a product named "cli" or "server".
-        UniqueConstraint("ef_project_id", "name"),
-    )
+    # DependencyTrack requires globally unique projects by `(name, version)`.
+    # PIA DB does not store versions, so the name alone must be globally
+    # unique. E.g. there cannot be two projects called "cli", even if they had
+    # different parent projects. However, DependencyTrack allows "(cli, v1)",
+    # "(cli, v2)", etc.
+    name: Mapped[str] = mapped_column(String, unique=True)
+    parent_uuid: Mapped[str] = mapped_column(String)
 
     @property
     def diff_key(self) -> tuple[str, ...]:
