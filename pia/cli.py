@@ -151,10 +151,11 @@ def sync(
 def create_dt_projects(file: str, dt_url: str | None) -> None:
     """Create the DependencyTrack projects referenced by a curated FILE.
 
-    Ensures every (project, product) DependencyTrack mapping in the file exists,
-    creating any missing root/child projects. Provisioning only — it does not touch
-    the PIA database, so run it before `pia sync` whenever a file introduces new
-    DependencyTrack targets. Idempotent: existing projects are left as-is.
+    Ensures the DependencyTrack project and products of every Eclipse Foundation
+    project in the file exist, creating any missing root/child projects.
+    Provisioning only — it does not touch the PIA database, so run it before
+    `pia sync` whenever a file introduces new DependencyTrack targets.
+    Idempotent: existing projects are left as-is.
 
     Requires --dt-url and PIA_DEPENDENCY_TRACK_API_KEY (with PORTFOLIO_MANAGEMENT
     permission to create projects).

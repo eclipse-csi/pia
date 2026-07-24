@@ -6,7 +6,7 @@ that are no longer in the file.
 
 The file is a list of Eclipse Foundation projects, each with a flat list of workload
 URLs (GitHub repo or Jenkins instance URL — the type is inferred from the host) and a
-list of DependencyTrack (project, product) mappings. A Jenkins workload is listed as
+single DependencyTrack project with its products. A Jenkins workload is listed as
 its instance URL; PIA appends ``/oidc`` to derive the OIDC issuer:
 
     projects:
@@ -15,8 +15,10 @@ its instance URL; PIA appends ``/oidc`` to derive the OIDC issuer:
           - https://github.com/eclipse-foo/repo
           - https://ci.eclipse.org/foo
         dependency_track:
-          - project: "Eclipse Foo"
-            product: foo-server
+          project: "Eclipse Foo"
+          products:
+            - foo-server
+            - foo-cli
 """
 
 import logging
@@ -50,17 +52,17 @@ logger = logging.getLogger(__name__)
 
 
 class DtProjectSpec(BaseModel):
-    """A DependencyTrack (project, product) mapping.
+    """The DependencyTrack project and its products.
 
-    ``project`` is the Eclipse Foundation project — a DependencyTrack root project;
-    ``product`` is a product within it — the root's immediate child and the SBOM
-    upload target.
+    ``project`` is a DependencyTrack root project of an Eclipse Foundation
+    project, and it is the parent of all its products; ``products`` are the
+    root's immediate children and the SBOM upload targets.
     """
 
     model_config = ConfigDict(extra="forbid")
 
     project: str
-    product: str
+    products: list[str] = Field(min_length=1)
 
 
 class ProjectSpec(BaseModel):
@@ -70,7 +72,7 @@ class ProjectSpec(BaseModel):
 
     id: str
     workloads: list[str] = Field(default_factory=list)
-    dependency_track: list[DtProjectSpec] = Field(default_factory=list)
+    dependency_track: DtProjectSpec | None = None
 
 
 class ProjectsFile(BaseModel):
@@ -130,10 +132,9 @@ def classify_workload_url(url: str) -> tuple[str, str, str]:
 def validate_projects_file(pf: ProjectsFile) -> None:
     """Semantic validation beyond structural parsing (no network access).
 
-    Enforces: unique project ids; every workload URL is a valid GitHub/Jenkins
-    URL and globally unique; DependencyTrack product names are unique within a
-    project and DependencyTrack (project, product) mappings are unique across
-    the whole file.
+    Enforces: globally unique Eclipse Foundation project ids; globally unique
+    workload URLs that are valid GitHub/Jenkins URLs; and globally unique
+    DependencyTrack names (projects and products alike).
     """
     # Raise on duplicate project IDs
     ids = [p.id for p in pf.projects]
@@ -142,7 +143,7 @@ def validate_projects_file(pf: ProjectsFile) -> None:
         raise click.ClickException(f"Duplicate project id(s): {', '.join(dupes)}")
 
     seen_workloads: set[tuple[str, str, str]] = set()
-    seen_dt_pairs: set[tuple[str, str]] = set()
+    seen_dt_names: set[str] = set()
     for project in pf.projects:
         # Raise on invalid or duplicate **resolved** workloads URLs
         for url in project.workloads:
@@ -151,24 +152,17 @@ def validate_projects_file(pf: ProjectsFile) -> None:
                 raise click.ClickException(f"Duplicate resolved workload URL(s): {url}")
             seen_workloads.add(workload)
 
-        # Raise on global duplicate DependencyTrack product names
-        seen_dt_products: set[str] = set()
-        for dt in project.dependency_track:
-            if dt.product in seen_dt_products:
-                raise click.ClickException(
-                    f"Duplicate DependencyTrack product name(s) in {project.id!r}: "
-                    f"{dt.product}"
-                )
-            seen_dt_products.add(dt.product)
+        dt = project.dependency_track
+        if not dt:
+            continue
 
-            # Raise on global duplicate DependencyTrack project/product pairs
-            pair = (dt.project, dt.product)
-            if pair in seen_dt_pairs:
+        # Raise on any - project or product - DependencyTrack name used twice
+        for name in (dt.project, *dt.products):
+            if name in seen_dt_names:
                 raise click.ClickException(
-                    "Duplicate DependencyTrack (project, product) mapping(s): "
-                    f"{dt.project}/{dt.product}"
+                    f"Duplicate DependencyTrack project name in {project.id!r}: {name}"
                 )
-            seen_dt_pairs.add(pair)
+            seen_dt_names.add(name)
 
 
 # --------------------------------------------------------------------------- #
@@ -236,6 +230,12 @@ def _dt_create_project(
             "Content-Type": JSON_TYPE,
         },
     )
+    if response.status_code == 409:
+        raise click.ClickException(
+            f"DependencyTrack already has a project named {name!r}. "
+            "DependencyTrack projects must be globally unique across all "
+            "hierarchy levels."
+        )
     response.raise_for_status()
     return response.json()
 
@@ -310,7 +310,7 @@ def ensure_dt_projects(
 ) -> list[tuple[str, str]]:
     """Create any missing DependencyTrack projects for the file's DT mappings.
 
-    For every ``(project, product)`` mapping in the curated file, ensure the root
+    For every product of every curated Eclipse Foundation project, ensure the root
     and child project exist on DependencyTrack, creating whichever are missing.
     This is the provisioning step behind ``pia create-dt-projects``: it touches
     only DependencyTrack (no PIA database, no GitHub) and is idempotent — an
@@ -321,11 +321,14 @@ def ensure_dt_projects(
     root_cache: dict[str, dict[str, Any]] = {}
     ensured: list[tuple[str, str]] = []
     for project in pf.projects:
-        for dt in project.dependency_track:
+        dt = project.dependency_track
+        if not dt:
+            continue
+        for product in dt.products:
             resolve_dt_child_uuid(
-                dt_url, dt.project, dt.product, dt_api_key, root_cache, create=True
+                dt_url, dt.project, product, dt_api_key, root_cache, create=True
             )
-            ensured.append((dt.project, dt.product))
+            ensured.append((dt.project, product))
     return ensured
 
 
@@ -390,17 +393,21 @@ def build_desired(
                 jk = JenkinsWorkload(ef_project_id=project.id, issuer=issuer)
                 desired.jenkins[jk.diff_key] = jk
 
-        for dt in project.dependency_track:
+        dt = project.dependency_track
+        if not dt:
+            continue
+
+        for product in dt.products:
             child_uuid = resolve_dt_child_uuid(
                 dt_url,
                 dt.project,
-                dt.product,
+                product,
                 dt_api_key,
                 dt_root_cache,
             )
             dtp = DependencyTrackProject(
                 ef_project_id=project.id,
-                name=dt.product,
+                name=product,
                 parent_uuid=child_uuid,
             )
             desired.dt[dtp.diff_key] = dtp

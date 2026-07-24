@@ -384,8 +384,8 @@ using the `PIA_DATABASE_URL` environment variable, e.g.
 
 Reconciles the whole authorization state to match a curated projects file. The
 file lists Eclipse Foundation projects, each with a flat list of workload URLs
-(GitHub repo or Jenkins instance URL — classified by host) and a list of
-DependencyTrack `(project, product)` mappings. `sync` resolves the external
+(GitHub repo or Jenkins instance URL — classified by host) and a single
+DependencyTrack project with its products. `sync` resolves the external
 data (GitHub owner ids, DependencyTrack child UUIDs), diffs the desired state
 against the database, prints a plan, and applies it so the database matches the
 file.
@@ -399,16 +399,28 @@ projects:
       - https://github.com/eclipse-foo/repo
       - https://ci.eclipse.org/foo
     dependency_track:
-      - project: "Eclipse Foo"
-        product: foo-server
+      project: "Eclipse Foo"
+      products:
+        - foo-server
+        - foo-cli
 ```
+
+Every DependencyTrack name in the file — projects and products alike — must be
+globally unique, and `sync` rejects a file that repeats one. PIA creates these
+projects without a version, and DependencyTrack refuses a `(name, version)` that
+already exists *regardless of parent*, so two projects each naming a product
+`cli` could never both be provisioned. Global uniqueness also makes the Eclipse
+Foundation project to DependencyTrack project mapping 1:1: the file structure
+gives one DependencyTrack project per Eclipse project, this rule gives one
+Eclipse project per DependencyTrack project.
 
 #### `pia create-dt-projects`
 
-Ensures every `(project, product)` DependencyTrack mapping in the curated file
-exists on DependencyTrack, creating any missing root/child projects. This is a
-provisioning step only — it does **not** touch the PIA database — so run it before
-`pia sync` whenever a file introduces new DependencyTrack targets.
+Ensures the DependencyTrack project and products of every Eclipse Foundation
+project in the curated file exist on DependencyTrack, creating any missing
+root/child projects. This is a provisioning step only — it does **not** touch the
+PIA database — so run it before `pia sync` whenever a file introduces new
+DependencyTrack targets.
 
 ## 6. Security Considerations
 

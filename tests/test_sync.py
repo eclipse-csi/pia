@@ -94,8 +94,8 @@ def test_load_and_validate_ok(tmp_path):
               - https://github.com/eclipse-foo/repo
               - https://ci.eclipse.org/foo
             dependency_track:
-              - project: "Eclipse Foo"
-                product: foo-server
+              project: "Eclipse Foo"
+              products: [foo-server]
         """,
     )
     pf = load_projects_file(f)
@@ -183,10 +183,7 @@ def test_build_desired_derives_jenkins_issuer():
     ]
 
 
-def test_validate_rejects_cross_project_dt_mapping(tmp_path):
-    # The DB uniqueness on DependencyTrackProject is (name, parent_uuid) with no
-    # ef_project_id, so the same (project, product) target under two EF projects
-    # would collide on apply. Validation must reject it up front.
+def test_validate_rejects_colliding_dt_projects(tmp_path):
     pf = load_projects_file(
         _write(
             tmp_path,
@@ -194,22 +191,20 @@ def test_validate_rejects_cross_project_dt_mapping(tmp_path):
             projects:
               - id: a
                 dependency_track:
-                  - project: "Eclipse Foo"
-                    product: shared
+                  project: "Eclipse Foo"
+                  products: [server]
               - id: b
                 dependency_track:
-                  - project: "Eclipse Foo"
-                    product: shared
+                  project: "Eclipse Foo"
+                  products: [cli]
             """,
         )
     )
-    with pytest.raises(click.ClickException, match="Duplicate DependencyTrack"):
+    with pytest.raises(click.ClickException, match="Duplicate DependencyTrack project"):
         validate_projects_file(pf)
 
 
-def test_validate_allows_same_dt_product_under_different_projects(tmp_path):
-    # Same product name but distinct projects resolves to distinct (name,
-    # parent_uuid) pairs, so it must not be rejected as a cross-project collision.
+def test_validate_rejects_colliding_dt_products(tmp_path):
     pf = load_projects_file(
         _write(
             tmp_path,
@@ -217,16 +212,72 @@ def test_validate_allows_same_dt_product_under_different_projects(tmp_path):
             projects:
               - id: a
                 dependency_track:
-                  - project: "Eclipse Foo"
-                    product: shared
+                  project: "Eclipse Foo"
+                  products: [shared]
               - id: b
                 dependency_track:
-                  - project: "Eclipse Bar"
-                    product: shared
+                  project: "Eclipse Bar"
+                  products: [shared]
             """,
         )
     )
-    validate_projects_file(pf)  # no raise
+    with pytest.raises(click.ClickException, match="Duplicate DependencyTrack project"):
+        validate_projects_file(pf)
+
+
+def test_validate_rejects_colliding_dt_project_and_product(tmp_path):
+    pf = load_projects_file(
+        _write(
+            tmp_path,
+            """
+            projects:
+              - id: a
+                dependency_track:
+                  project: "Eclipse Foo"
+                  products: [pia]
+              - id: b
+                dependency_track:
+                  project: "pia"
+                  products: [cli]
+            """,
+        )
+    )
+    with pytest.raises(click.ClickException, match="Duplicate DependencyTrack project"):
+        validate_projects_file(pf)
+
+
+def test_validate_rejects_colliding_local_dt_products(tmp_path):
+    pf = load_projects_file(
+        _write(
+            tmp_path,
+            """
+            projects:
+              - id: a
+                dependency_track:
+                  project: "Eclipse Foo"
+                  products: [server, server]
+            """,
+        )
+    )
+    with pytest.raises(
+        click.ClickException, match="Duplicate DependencyTrack project name"
+    ):
+        validate_projects_file(pf)
+
+
+def test_load_rejects_dt_project_without_products(tmp_path):
+    pf_path = _write(
+        tmp_path,
+        """
+        projects:
+          - id: a
+            dependency_track:
+              project: "Eclipse Foo"
+              products: []
+        """,
+    )
+    with pytest.raises(click.ClickException, match="Invalid projects file"):
+        load_projects_file(pf_path)
 
 
 def test_validate_rejects_unknown_field(tmp_path):
@@ -525,8 +576,8 @@ def test_sync_dry_run_writes_nothing(runner, tmp_path, session_factory, patch_cl
           - id: eclipse-foo
             workloads: ["https://github.com/eclipse-foo/repo"]
             dependency_track:
-              - project: "Eclipse Foo"
-                product: foo-server
+              project: "Eclipse Foo"
+              products: [foo-server]
         """,
     )
     result = runner.invoke(
@@ -565,8 +616,8 @@ def test_sync_fails_on_missing_dt_project(
         projects:
           - id: eclipse-foo
             dependency_track:
-              - project: "Eclipse Foo"
-                product: foo-server
+              project: "Eclipse Foo"
+              products: [foo-server]
         """,
     )
     result = runner.invoke(cli_module.cli, ["sync", f, "--dt-url", "https://dt"])
@@ -583,8 +634,8 @@ def test_sync_apply_creates_rows(runner, tmp_path, session_factory, patch_cli):
           - id: eclipse-foo
             workloads: ["https://github.com/eclipse-foo/repo"]
             dependency_track:
-              - project: "Eclipse Foo"
-                product: foo-server
+              project: "Eclipse Foo"
+              products: [foo-server]
         """,
     )
     result = runner.invoke(cli_module.cli, ["sync", f, "--dt-url", "https://dt"])
@@ -736,7 +787,7 @@ def test_ensure_dt_projects_creates_missing(monkeypatch):
         projects=[
             ProjectSpec(
                 id="p",
-                dependency_track=[DtProjectSpec(project="Root", product="Child")],
+                dependency_track=DtProjectSpec(project="Root", products=["Child"]),
             )
         ]
     )
@@ -764,8 +815,8 @@ def test_create_dt_projects_command_creates_missing(runner, tmp_path, monkeypatc
         projects:
           - id: eclipse-foo
             dependency_track:
-              - project: "Eclipse Foo"
-                product: foo-server
+              project: "Eclipse Foo"
+              products: [foo-server]
         """,
     )
     result = runner.invoke(
@@ -791,8 +842,8 @@ def test_create_dt_projects_command_requires_dt_config(runner, tmp_path, monkeyp
         projects:
           - id: eclipse-foo
             dependency_track:
-              - project: "Eclipse Foo"
-                product: foo-server
+              project: "Eclipse Foo"
+              products: [foo-server]
         """,
     )
     # --dt-url omitted -> refuse before touching DependencyTrack.
