@@ -22,7 +22,7 @@ See [Design Document](docs/DESIGN.md) for details.
 
 PIA uses [uv](https://docs.astral.sh/uv/) for Python project management.
 
-1. **Clone and changew into repository:**
+1. **Clone and change into repository:**
    ```bash
    git clone https://github.com/eclipse-csi/pia.git && cd pia
    ```

@@ -175,7 +175,17 @@ class JenkinsWorkload(Workload):
 
 
 class DependencyTrackProject(Base):
-    """DependencyTrack target for SBOM uploads."""
+    """DependencyTrack target for SBOM uploads.
+
+    ``name`` is the DependencyTrack name shared by two projects: the
+    version-less "product aggregation project", whose UUID is ``parent_uuid``,
+    and the per-version "product project" DependencyTrack auto-creates on each
+    upload. It is matched against ``product_name`` from the PIA upload::
+
+        <DependencyTrack project>   root, one per Eclipse Foundation project
+        └── <name>                  product aggregation — parent_uuid points here
+            └── <name> <version>    auto-created per upload, one per version
+    """
 
     __tablename__ = "dependency_track_projects"
 
@@ -189,16 +199,32 @@ class DependencyTrackProject(Base):
     name: Mapped[str] = mapped_column(String)
     parent_uuid: Mapped[str] = mapped_column(String)
 
+    # UNIQUE("name", "parent_uuid"): A DependencyTrack target belongs to exactly
+    # one EF project, so an upload authorized for one can never reach
+    # another's. Caveat: This holds as long as `name` and `parent_uuid` in a
+    # row refer to the same DependencyTrack project. However, an incoherent row
+    # would escape the constraint, since uploads are routed by `parent_uuid`
+    # alone:
+    # ("eclipse.foo", "cli", "UUID-A") and ("eclipse.bar", "cli-other", "UUID-A")
+    # satisfy the constraint, while sending both projects into "UUID-A".
+    # `pia sync` guarantees coherency.
+    #
+    # UNIQUE("ef_project_id", "name"): A `product_name` must resolve to at most
+    # one `name` within the authenticated workload's EF project in
+    # `find_dt_project`. This constraint is a defensive policy, to avoid a 500
+    # on upload due to an unhandled `MultipleResultsFound` from
+    # `scalar_one_or_none`, if the assumption from above does not hold true.
+    #
+    # Neither constraint makes `name` globally unique, so two EF projects can
+    # each claim a product named "cli" here. `validate_projects_file` rejects
+    # that outright — the curated file is the only writer, and DependencyTrack
+    # would refuse the second one at provisioning anyway.
+    #
+    # TODO: Consider replacing both constraints with single-column constraints
+    # on "name" and "parent_uuid" — or on "name" alone, once "parent_uuid" is
+    # dropped with eclipse-csi/pia#79.
     __table_args__ = (
-        # DependencyTrack targets (product name plus uuid) are globally unique
-        # and map to exactly one EF project. Keeping it globally unique stops
-        # two EF projects from pointing at the same DT target, so an upload
-        # authorized for one project can never reach another's DT project.
         UniqueConstraint("name", "parent_uuid"),
-        # DependencyTrack target names (product name) are unique within an EF
-        # project to avoid ambiguity when resolving the target based on the
-        # name in the upload payload. They are not globally unique, to allow
-        # different EF projects to e.g. upload a product named "cli" or "server".
         UniqueConstraint("ef_project_id", "name"),
     )
 
