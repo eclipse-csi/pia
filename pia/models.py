@@ -5,7 +5,7 @@ from typing import Any
 from urllib.parse import urlparse
 
 from pydantic import BaseModel, ConfigDict, Field, HttpUrl
-from sqlalchemy import ForeignKey, Select, String, UniqueConstraint, select
+from sqlalchemy import ForeignKey, MetaData, Select, String, UniqueConstraint, select
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column
 
 logger = logging.getLogger(__name__)
@@ -37,8 +37,23 @@ Restricts the OIDC mint to events that require write access to the repo
 indirectly driven by non-maintainers. Relax on demand."""
 
 
+NAMING_CONVENTION = {
+    "ix": "%(table_name)s_%(column_0_N_name)s_idx",
+    "uq": "%(table_name)s_%(column_0_N_name)s_key",
+    "ck": "%(table_name)s_%(constraint_name)s_check",
+    "fk": "%(table_name)s_%(column_0_N_name)s_fkey",
+    "pk": "%(table_name)s_pkey",
+}
+"""DB constraint naming convention modeled after PostgreSQL default names, and
+used by `alembic revision --autogenerate`.
+
+See https://alembic.sqlalchemy.org/en/latest/naming.html"""
+
+
 class Base(DeclarativeBase):
-    """Declarative base class for al ORM models."""
+    """Declarative base class for all ORM models."""
+
+    metadata = MetaData(naming_convention=NAMING_CONVENTION)
 
 
 class EclipseFoundationProject(Base):
