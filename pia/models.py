@@ -2,7 +2,6 @@
 
 import logging
 from typing import Any
-from urllib.parse import urlparse
 
 from pydantic import BaseModel, ConfigDict, Field, HttpUrl
 from sqlalchemy import ForeignKey, MetaData, Select, String, UniqueConstraint, select
@@ -240,18 +239,22 @@ class DependencyTrackProject(Base):
         )
 
 
-def is_issuer_known(issuer: str) -> bool:
-    """Check if issuer is generally known to PIA.
+def is_issuer_known(session: Session, issuer: str) -> bool:
+    """Check if issuer is known to PIA.
 
     GitHub: issuer must equal GITHUB_ISSUER
-    Jenkins: issuer's scheme and host must equal JENKINS_ISSUER_BASE_URL
-
+    Jenkins: issuer must equal the issuer of a registered JenkinsWorkload in DB
     """
     if issuer == GITHUB_ISSUER:
         return True
 
-    parsed = urlparse(issuer)
-    return f"{parsed.scheme}://{parsed.hostname}" == JENKINS_ISSUER_BASE_URL
+    # Preliminary host check to skip more costly db query below for obvious junk
+    if not issuer.startswith(JENKINS_ISSUER_BASE_URL + "/"):
+        return False
+
+    # More costly, but also more robust than a URL pattern match
+    stmt = select(JenkinsWorkload.id).where(JenkinsWorkload.issuer == issuer)
+    return session.execute(stmt).first() is not None
 
 
 def find_workload_by_claims(

@@ -111,8 +111,13 @@ async def authenticate(
 
     logger.info(f"Unverified issuer extracted: {unverified_issuer!a}")
 
-    # Inexpensive pre-verification check
-    if not is_issuer_known(unverified_issuer):
+    # Pre-verification check. The issuer URL from the unverified token is used
+    # for OIDC discovery and JWKs requests. It MUST NOT be chosen freely by an
+    # untrusted caller (CWE-918).
+    # NOTE: Issuers that look like Jenkins are matched against registered
+    # Jenkins workloads in the DB. This may be more costly than a pattern
+    # match, but cannot be bypassed.
+    if not is_issuer_known(session, unverified_issuer):
         logger.warning(f"Issuer {unverified_issuer!a} not allowed")
         _401("Issuer not allowed")
 

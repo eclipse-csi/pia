@@ -154,8 +154,8 @@ sequenceDiagram
    2. Extract issuer
    3. Verify issuer is known
       - GitHub: Full match: `https://token.actions.githubusercontent.com`
-      - Jenkins: Parse the issuer as a URL and require an `https` scheme with
-        the host exactly equal to `ci.eclipse.org`
+      - Jenkins: Full match against the `issuer` of a Jenkins workload already
+        registered in the workload database.
 3. Token Key Discovery
    1. Fetch OIDC configuration from `{issuer}/.well-known/openid-configuration`
    2. Extract `jwks_uri` from configuration
@@ -170,7 +170,9 @@ sequenceDiagram
    1. Find workload type by issuer
    2. Find workload by matching verified token claims against workload database:
       - GitHub: match `repo_owner`, `repo_name`, `repo_owner_id`
-      - Jenkins: match `issuer`
+      - Jenkins: match `issuer`. (repeats step 2.3, with different semantics: there we
+        check the *unverified* issuer URL to prevent arbitrary requests in steps 3 and 4;
+        here we authenticate a workload based on verified token claims)
 6. Workload-Specific Claim Verification
    - GitHub: `event_name` must be in the allowlist `{push, workflow_dispatch}`.
      Excludes triggers that can be indirectly driven by non-maintainers

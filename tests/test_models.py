@@ -20,40 +20,51 @@ GITHUB_ISSUER = "https://token.actions.githubusercontent.com"
 
 
 class TestIsIssuerKnown:
-    def test_github_issuer_known(self):
-        assert is_issuer_known(GITHUB_ISSUER)
+    def test_github_issuer_known(self, seed_db):
+        assert is_issuer_known(seed_db, GITHUB_ISSUER)
 
-    def test_jenkins_issuer_known(self):
-        assert is_issuer_known("https://ci.eclipse.org/eclipse-other/oidc")
-
-    def test_jenkins_issuer_bare_host_known(self):
-        assert is_issuer_known("https://ci.eclipse.org")
-
-    def test_arbitrary_issuer_unknown(self):
-        assert not is_issuer_known("https://attacker.com")
+    def test_jenkins_issuer_known(self, seed_db):
+        assert is_issuer_known(seed_db, "https://ci.eclipse.org/eclipse-other/oidc")
 
     @pytest.mark.parametrize(
         "issuer",
         [
-            # Userinfo before "@": the real host is other.host, not ci.eclipse.org.
+            # Prefix-only match can be bypassed with userinfo or suffix trick.
+            "https://ci.eclipse.org",
             "https://ci.eclipse.org@other.host",
             "https://ci.eclipse.org@127.0.0.1:8888",
-            # Suffix on the host: ci.eclipse.org.other.host is a different host.
             "https://ci.eclipse.org.other.host",
             "https://ci.eclipse.org.other.host/eclipse-x/oidc",
-            # Host is only a prefix substring, not the whole host.
             "https://ci.eclipse.org.evil.example/.well-known/openid-configuration",
+            # Hostname parses differently in urlparse (time of check) vs.
+            # requests/urllib3 (time of use).
+            "https://attacker-evil-host.example:443\\@ci.eclipse.org/",
+            "https://169.254.169.254:443\\@ci.eclipse.org/",
+            "https://169.254.169.254\\@ci.eclipse.org/eclipse-other/oidc",
+            "https://ci.eclipse.org\\.evil.example/eclipse-other/oidc",
+            "https://ci.eclipse.org\t@evil.example/eclipse-other/oidc",
+            "https://ci.eclipse.org\n@evil.example/eclipse-other/oidc",
+            "https://ci.eclipse.org%00@evil.example/eclipse-other/oidc",
+            # Unregistered issuer is rejected, even if the URL is well-formed.
+            "https://ci.eclipse.org/no-such/oidc",
+            # Near-match of registered issuer is rejected.
+            "https://ci.eclipse.org/eclipse-other/oidc@evil.example",
+            "https://ci.eclipse.org/eclipse-other/oidc.evil.example",
+            "https://ci.eclipse.org/eclipse-other/oidc?next=@evil.example",
+            "https://ci.eclipse.org/eclipse-other/oidc#@evil.example",
+            "https://ci.eclipse.org:443/eclipse-other/oidc",
+            "https://CI.ECLIPSE.ORG/eclipse-other/oidc",
+            # Wrong host, scheme, or not a URL at all.
+            "https://attacker.com",
+            "http://ci.eclipse.org/eclipse-other/oidc",
+            "file:///etc/passwd",
+            "ci.eclipse.org",
+            "not a url",
+            "",
         ],
     )
-    def test_issuer_resolving_to_other_host_unknown(self, issuer):
-        assert not is_issuer_known(issuer)
-
-    def test_non_https_jenkins_issuer_unknown(self):
-        assert not is_issuer_known("http://ci.eclipse.org/eclipse-other/oidc")
-
-    def test_malformed_issuer_unknown(self):
-        assert not is_issuer_known("ci.eclipse.org")
-        assert not is_issuer_known("not a url")
+    def test_issuer_unknown(self, seed_db, issuer):
+        assert not is_issuer_known(seed_db, issuer)
 
 
 class TestFindWorkloadByClaims:
