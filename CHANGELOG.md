@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.0] - 2026-07-29
+
+### Added
+* `sync` and `create-dt-projects` CLI (#68, #76, #82)
+* Local CLI e2e test setup (#72, #77)
+
+### Removed
+* `add-workload` and `add-dt-project` CLI (#69)
+
+### Fixed
+* DB connection loss (#65)
+* DB uniqueness constraints - DependencyTrack product names must be unique
+  within EF projects (#73, #80)
+* Block PRs on zizmor findings (#83)
+* Match Jenkins issuer against registered workloads (#84)
+
 ## [0.5.0] - 2026-07-03
 
 ### Changed
