@@ -1,0 +1,37 @@
+name: Generate SBOM
+
+on:
+  registry_package:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Docker image tag (e.g. 0.2.1)"
+        required: true
+
+permissions:
+  id-token: write
+
+env:
+  REGISTRY: ghcr.io
+  OWNER: eclipse-csi
+  NAME: pia
+  VERSION: "${{ inputs.version || github.event.registry_package.package_version.container_metadata.tag.name }}"
+
+jobs:
+  sbom-docker:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Generate SBOM
+      uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
+      with:
+        image: ${{ env.REGISTRY }}/${{ env.OWNER }}/${{ env.NAME }}:${{ env.VERSION }}
+        output-file: sbom.json
+        format: cyclonedx-json
+        upload-artifact: false
+
+    - uses: eclipse-csi/workflows/upload-sbom@20e3c63807b2bd61b7f1a9f438e5ce588c054efc
+      with:
+        sbom-file: sbom.json
+        product-name: ${{ env.NAME }}
+        product-version: ${{ env.VERSION }}
