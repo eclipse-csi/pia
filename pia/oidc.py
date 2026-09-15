@@ -6,6 +6,8 @@ from typing import Any
 import jwt
 import requests
 
+from .metrics import OIDC_FETCH_DURATION, TOKEN_VERIFICATION_DURATION
+
 logger = logging.getLogger(__name__)
 
 
@@ -13,6 +15,7 @@ class TokenVerificationError(Exception):
     """Raised when token verification fails."""
 
 
+@TOKEN_VERIFICATION_DURATION.time()
 def verify_token(
     token: str,
     issuer: str,
@@ -28,9 +31,10 @@ def verify_token(
 
     try:
         logger.info(f"Fetching OIDC configuration from {config_url}")
-        response = requests.get(config_url, timeout=10)
-        response.raise_for_status()
-        oidc_config = response.json()
+        with OIDC_FETCH_DURATION.labels(phase="discovery").time():
+            response = requests.get(config_url, timeout=10)
+            response.raise_for_status()
+            oidc_config = response.json()
         logger.info("OIDC configuration fetched successfully")
 
     except requests.RequestException as e:
@@ -48,8 +52,9 @@ def verify_token(
     try:
         # 3. Requests public keys from issuer
         logger.info("Fetching signing key from JWKS endpoint")
-        jwks_client = jwt.PyJWKClient(jwks_uri)
-        signing_key = jwks_client.get_signing_key_from_jwt(token)
+        with OIDC_FETCH_DURATION.labels(phase="jwks").time():
+            jwks_client = jwt.PyJWKClient(jwks_uri)
+            signing_key = jwks_client.get_signing_key_from_jwt(token)
         logger.info("Signing key retrieved successfully")
 
         # 4. Verify token signature and content
