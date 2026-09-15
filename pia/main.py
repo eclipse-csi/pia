@@ -1,16 +1,20 @@
 """API endpoints for PIA."""
 
 import logging
+import time
+from collections.abc import Awaitable, Callable
 from contextlib import asynccontextmanager
 from typing import Annotated, NoReturn
 
 import jwt
 from fastapi import Depends, FastAPI, Header, HTTPException, Request, Response, status
+from prometheus_client import CONTENT_TYPE_PLAIN_0_0_4, generate_latest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 
-from . import __version__, dependencytrack, oidc
+from . import __version__, dependencytrack, metrics, oidc
 from .config import Settings
+from .metrics import RejectionReason, UploadOutcome
 from .models import (
     DependencyTrackUploadPayload,
     PiaUploadPayload,
@@ -63,6 +67,37 @@ app = FastAPI(
 logger.info("PIA application initialized successfully")
 
 
+@app.middleware("http")
+async def record_http_metrics(
+    request: Request,
+    call_next: Callable[[Request], Awaitable[Response]],
+) -> Response:
+    """Count and time every HTTP request, labeled by matched route template."""
+    # Default to 500: an unhandled endpoint exception is turned into a 500 by
+    # ServerErrorMiddleware, which wraps *outside* this middleware, so here is
+    # the only place that outcome can be recorded. Binding it before the `try`
+    # (rather than in an `except`) also covers BaseExceptions like the
+    # CancelledError raised on client disconnect.
+    status_code = 500
+    start = time.perf_counter()
+    try:
+        response = await call_next(request)
+        status_code = response.status_code
+        return response
+    finally:
+        duration = time.perf_counter() - start
+        # The router writes the matched route into the live scope dict, so it
+        # is only readable once the request has been handled.
+        route = request.scope.get("route")
+        path = route.path if route else metrics.UNMATCHED_PATH
+        metrics.HTTP_REQUESTS.labels(
+            method=request.method, path=path, status=str(status_code)
+        ).inc()
+        metrics.HTTP_REQUEST_DURATION.labels(method=request.method, path=path).observe(
+            duration
+        )
+
+
 def get_session(request: Request):
     """FastAPI dependency yielding a database session.
 
@@ -75,12 +110,30 @@ def get_session(request: Request):
         session.close()
 
 
-def _401(msg: str) -> NoReturn:
-    """Helper to return 401"""
+def _401(msg: str, reason: RejectionReason) -> NoReturn:
+    """Count the rejection and return 401.
+
+    The `reason` label is typed as a Literal so mypy rejects any value outside
+    the declared set, keeping the metric's cardinality bounded by construction.
+    """
+    metrics.UPLOAD_REJECTIONS.labels(reason=reason).inc()
     raise HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail=msg,
     )
+
+
+def _record_upload(
+    workload: Workload,
+    product_name: str,
+    outcome: UploadOutcome,
+) -> None:
+    """Count an upload attempt for an authenticated workload."""
+    metrics.SBOM_UPLOADS.labels(
+        ef_project_id=workload.ef_project_id,
+        product_name=product_name,
+        outcome=outcome,
+    ).inc()
 
 
 async def authenticate(
@@ -96,7 +149,7 @@ async def authenticate(
 
     # Extract Bearer token from Authorization header
     if not authorization.startswith("Bearer "):
-        _401("Invalid Authorization header format")
+        _401("Invalid Authorization header format", "invalid_header")
     token = authorization[7:]  # Remove "Bearer " prefix
 
     logger.info("Bearer token extracted from Authorization header")
@@ -110,7 +163,7 @@ async def authenticate(
         unverified_issuer: str = unverified_claims["iss"]
     except jwt.PyJWTError as e:
         logger.warning(f"Token decode failed: {e}")
-        _401("Invalid token")
+        _401("Invalid token", "invalid_token")
 
     logger.info(f"Unverified issuer extracted: {unverified_issuer!a}")
 
@@ -122,7 +175,7 @@ async def authenticate(
     # match, but cannot be bypassed.
     if not is_issuer_known(session, unverified_issuer):
         logger.warning(f"Issuer {unverified_issuer!a} not allowed")
-        _401("Issuer not allowed")
+        _401("Issuer not allowed", "issuer_not_allowed")
 
     logger.info(
         f"Issuer '{unverified_issuer!a}' is allowed, proceeding with token verification"
@@ -136,7 +189,7 @@ async def authenticate(
         )
     except oidc.TokenVerificationError as e:
         logger.warning(f"Token verification failed: {e}")
-        _401("Token verification failed")
+        _401("Token verification failed", "verification_failed")
 
     logger.info("Token signature verified successfully")
 
@@ -146,7 +199,7 @@ async def authenticate(
         logger.warning(
             f"No matching workload found for token claims: {verified_claims}"
         )
-        _401("No matching workload found for token claims")
+        _401("No matching workload found for token claims", "no_workload")
 
     # Workload-type-specific claim verification (e.g. GitHub event_name allowlist)
     reason = verify_workload_claims(workload, verified_claims)
@@ -157,7 +210,8 @@ async def authenticate(
         # was rejected to fix its workflow (or submit an issue).
         _401(
             f"Token claims rejected: {reason}. If this claim should be "
-            f"accepted, file an issue at {ISSUE_TRACKER_URL}"
+            f"accepted, file an issue at {ISSUE_TRACKER_URL}",
+            "claims_rejected",
         )
 
     logger.info(
@@ -174,6 +228,20 @@ async def livez():
     return {"status": "ok"}
 
 
+@app.get("/metrics")
+async def get_metrics():
+    """Prometheus scrape endpoint.
+
+    Pins the 0.0.4 text format: prometheus_client's CONTENT_TYPE_LATEST now
+    advertises version=1.0.0, and the scraper version is set by the Helm chart,
+    not by us.
+    """
+    return Response(
+        content=generate_latest(),
+        media_type=CONTENT_TYPE_PLAIN_0_0_4,
+    )
+
+
 @app.post("/v1/upload/sbom", status_code=status.HTTP_200_OK)
 async def upload_sbom(
     payload: PiaUploadPayload,
@@ -188,12 +256,20 @@ async def upload_sbom(
             f"No DependencyTrack project '{payload.product_name}' found for "
             f"ef_project_id '{workload.ef_project_id}'"
         )
-        _401("No matching DependencyTrack project found")
+        # The requested product_name is caller-controlled and unvalidated at
+        # this point, so it must not become a label value.
+        _record_upload(workload, metrics.UNREGISTERED_PRODUCT, "no_dt_project")
+        _401("No matching DependencyTrack project found", "no_dt_project")
 
     logger.info(
         f"Resolved DependencyTrack project '{dt_project.name}' "
         f"(parent_uuid={dt_project.parent_uuid})"
     )
+
+    # payload.bom is base64; derive the decoded size arithmetically rather than
+    # decoding a multi-MB string just to measure it. Observed before the upload
+    # so the size is recorded even when DependencyTrack rejects it.
+    metrics.SBOM_SIZE.observe(len(payload.bom) * 3 // 4)
 
     # Build DependencyTrack payload
     dt_payload = DependencyTrackUploadPayload(
@@ -206,13 +282,15 @@ async def upload_sbom(
 
     # Upload to DependencyTrack
     try:
-        dt_response = dependencytrack.upload_sbom(
-            str(settings.dependency_track_url),
-            settings.dependency_track_api_key,
-            dt_payload,
-        )
+        with metrics.DT_UPLOAD_DURATION.time():
+            dt_response = dependencytrack.upload_sbom(
+                str(settings.dependency_track_url),
+                settings.dependency_track_api_key,
+                dt_payload,
+            )
     except dependencytrack.DependencyTrackError as e:
         logger.error(f"DependencyTrack upload failed: {e}")
+        _record_upload(workload, dt_project.name, "dt_request_error")
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail="Failed to upload to DependencyTrack",
@@ -221,6 +299,7 @@ async def upload_sbom(
     # Relay DT failures verbatim; on success, return the polling URL the
     # publisher should query for processing status.
     if not dt_response.ok:
+        _record_upload(workload, dt_project.name, "dt_http_error")
         return Response(
             content=dt_response.content,
             status_code=dt_response.status_code,
@@ -238,7 +317,10 @@ async def upload_sbom(
             f"DependencyTrack returned unparseable success response "
             f"(status={dt_response.status_code}, body={dt_response.text!r})"
         )
+        _record_upload(workload, dt_project.name, "dt_bad_response")
         raise
+
+    _record_upload(workload, dt_project.name, "success")
 
     dt_url = str(settings.dependency_track_url).rstrip("/")
     return PiaUploadResponse(
