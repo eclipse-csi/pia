@@ -20,6 +20,9 @@ jobs:
     permissions:
       contents: read
       packages: write
+    outputs:
+      # Primary image tag, e.g. '0.6.0' for tag v0.6.0, 'dev' on main.
+      version: ${{ steps.meta.outputs.version }}
 
     steps:
     - name: Checkout
@@ -57,3 +60,14 @@ jobs:
         push: true
         tags: ${{ steps.meta.outputs.tags }}
         labels: ${{ steps.meta.outputs.labels }}
+
+  # Releases only: 'dev' and 'sha-*' images from main are not tracked in
+  # DependencyTrack. sbom.yml stays separately dispatchable for backfills.
+  sbom:
+    needs: build-and-push
+    if: startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      id-token: write
+    uses: ./.github/workflows/sbom.yml
+    with:
+      version: ${{ needs.build-and-push.outputs.version }}
