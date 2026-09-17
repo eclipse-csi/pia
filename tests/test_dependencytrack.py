@@ -5,7 +5,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 import requests
 
-from pia.dependencytrack import DependencyTrackError, upload_sbom
+from pia.dependencytrack import TIMEOUT, DependencyTrackError, upload_sbom
 from pia.models import DependencyTrackUploadPayload
 
 TEST_URL = "https://dt.example.com/api/v1/bom"
@@ -51,6 +51,7 @@ class TestUploadSBOM:
                 "Content-Type": "application/json",
                 "X-Api-Key": "test-api-key",
             },
+            timeout=TIMEOUT,
         )
 
     @patch("pia.dependencytrack.requests.put")
@@ -62,3 +63,19 @@ class TestUploadSBOM:
             DependencyTrackError, match="Failed to upload SBOM to DependencyTrack"
         ):
             upload_sbom(TEST_URL, TEST_API_KEY, dt_payload)
+
+    @patch("pia.dependencytrack.requests.put")
+    def test_upload_timeout(self, mock_put, dt_payload):
+        """A hung DependencyTrack surfaces as DependencyTrackError, not a hang."""
+        mock_put.side_effect = requests.Timeout()
+
+        with pytest.raises(
+            DependencyTrackError, match="Failed to upload SBOM to DependencyTrack"
+        ):
+            upload_sbom(TEST_URL, TEST_API_KEY, dt_payload)
+
+    def test_timeout_is_bounded(self):
+        """Guard against dropping the timeout: requests hangs forever without it."""
+        connect, read = TIMEOUT
+        assert 0 < connect <= 10
+        assert 0 < read <= 60
