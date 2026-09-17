@@ -4,17 +4,21 @@ Subcommands
 -----------
 - sync: Reconcile all project authorizations from a curated file into the
   database (create/update/delete).
+  - DependencyTrack API key needs VIEW_PORTFOLIO permission
+  - Permissionless GitHub token is optional for higher rate limits
+
 - create-dt-projects: Create the DependencyTrack projects referenced by a curated
   file (provisioning only; no database access).
+  - DependencyTrack API key needs VIEW_PORTFOLIO and PORTFOLIO_MANAGEMENT permission
 
 Usage Example
 -------------
-    PIA_DATABASE_URL=postgresql://user:secret@localhost:5432/pia \
-    PIA_DEPENDENCY_TRACK_API_KEY=<API key with VIEW_PORTFOLIO permission> \
-    PIA_GITHUB_TOKEN=<optional token with public read permission for rate limit> \
+    PIA_DATABASE_URL=postgresql://<user>:<secret>@<host>:<port>/<db> \
+    PIA_DEPENDENCY_TRACK_API_KEY=<secret> \
+    PIA_GITHUB_TOKEN=<secret> \
         uv run pia sync projects.yaml --dt-url https://sbom.eclipse.org --dry-run
 
-    PIA_DEPENDENCY_TRACK_API_KEY=<API key with PORTFOLIO_MANAGEMENT permission> \
+    PIA_DEPENDENCY_TRACK_API_KEY=<secret> \
         uv run pia create-dt-projects projects.yaml --dt-url https://sbom.eclipse.org
 
 """
@@ -157,8 +161,8 @@ def create_dt_projects(file: str, dt_url: str | None) -> None:
     `pia sync` whenever a file introduces new DependencyTrack targets.
     Idempotent: existing projects are left as-is.
 
-    Requires --dt-url and PIA_DEPENDENCY_TRACK_API_KEY (with PORTFOLIO_MANAGEMENT
-    permission to create projects).
+    Requires --dt-url and PIA_DEPENDENCY_TRACK_API_KEY (with VIEW_PORTFOLIO and
+    PORTFOLIO_MANAGEMENT permission to create projects).
     """
     pf = load_projects_file(file)
     validate_projects_file(pf)

@@ -310,13 +310,13 @@ def ensure_dt_projects(
 ) -> list[tuple[str, str]]:
     """Create any missing DependencyTrack projects for the file's DT mappings.
 
-    For every product of every curated Eclipse Foundation project, ensure the root
-    and child project exist on DependencyTrack, creating whichever are missing.
-    This is the provisioning step behind ``pia create-dt-projects``: it touches
-    only DependencyTrack (no PIA database, no GitHub) and is idempotent — an
-    existing project is resolved, not recreated. Requires a DT API key with
-    PORTFOLIO_MANAGEMENT permission. Returns the ``(project, product)`` pairs it
-    ensured, for reporting.
+    For every product of every curated Eclipse Foundation project, ensure the
+    root and child project exist on DependencyTrack, creating whichever are
+    missing. This is the provisioning step behind ``pia create-dt-projects``:
+    it touches only DependencyTrack (no PIA database, no GitHub) and is
+    idempotent — an existing project is resolved, not recreated. Requires a DT
+    API key with VIEW_PORTFOLIO and PORTFOLIO_MANAGEMENT permission. Returns
+    the ``(project, product)`` pairs it ensured, for reporting.
     """
     root_cache: dict[str, dict[str, Any]] = {}
     ensured: list[tuple[str, str]] = []
