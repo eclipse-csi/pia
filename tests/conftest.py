@@ -1,6 +1,7 @@
 """Pytest configuration and shared fixtures."""
 
 import pytest
+from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, event
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
@@ -90,3 +91,46 @@ def seed_db(session):
     )
     session.commit()
     return session
+
+
+@pytest.fixture
+def setup_env(monkeypatch):
+    """Set required env vars for Settings()."""
+    monkeypatch.setenv("PIA_DEPENDENCY_TRACK_API_KEY", "test-secret")
+    # Settings requires a value, but tests override the session dependency,
+    # so the URL is never actually opened.
+    monkeypatch.setenv("PIA_DATABASE_URL", "sqlite:///:memory:")
+
+
+@pytest.fixture
+def client(setup_env, seed_db, session_factory):
+    """FastAPI test client with overridden DB session."""
+    from pia.main import app, get_session
+
+    def override_get_session():
+        session = session_factory()
+        try:
+            yield session
+        finally:
+            session.close()
+
+    app.dependency_overrides[get_session] = override_get_session
+    with TestClient(app) as test_client:
+        yield test_client
+    app.dependency_overrides.clear()
+
+
+@pytest.fixture
+def metric_value():
+    """Read a sample from the default Prometheus registry.
+
+    Metrics are process-global and accumulate across tests (and
+    `MetricWrapperBase.clear()` is a no-op for unlabeled metrics), so assert on
+    the delta around an action rather than on an absolute value.
+    """
+    from prometheus_client import REGISTRY
+
+    def _read(name: str, **labels: str) -> float:
+        return REGISTRY.get_sample_value(name, labels or None) or 0.0
+
+    return _read
