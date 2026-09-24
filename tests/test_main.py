@@ -6,8 +6,11 @@ from unittest.mock import Mock, patch
 
 import jwt
 import pytest
-from fastapi import HTTPException
+from fastapi import HTTPException, Request
+from prometheus_client import REGISTRY
+from starlette.requests import ClientDisconnect
 
+from pia import metrics
 from pia.dependencytrack import DependencyTrackError
 from pia.models import GitHubWorkload, Workload
 from pia.oidc import TokenVerificationError
@@ -387,6 +390,76 @@ class TestHTTPMetrics:
         )
         assert metric_value("pia_http_requests_total", **labels, status="200") == (
             before_200
+        )
+
+    def test_nonstandard_methods_collapse_to_sentinel(self, client, metric_value):
+        """Invented methods must not mint a label value each (cardinality)."""
+        labels = dict(method=metrics.OTHER_METHOD, path="/livez", status="405")
+        before = metric_value("pia_http_requests_total", **labels)
+
+        client.request("XYZZY", "/livez")
+        client.request("PWNME", "/livez")
+
+        assert metric_value("pia_http_requests_total", **labels) == before + 2
+        recorded = {
+            sample.labels["method"]
+            for metric in REGISTRY.collect()
+            for sample in metric.samples
+            if "method" in sample.labels
+        }
+        assert recorded <= metrics.HTTP_METHODS | {metrics.OTHER_METHOD}
+
+    @patch("pia.main.dependencytrack.upload_sbom")
+    def test_client_disconnect_is_not_counted_as_500(
+        self, mock_upload, client, valid_request_data, metric_value
+    ):
+        """A hangup must stay out of the 5xx rate an SLO alert watches."""
+        mock_upload.side_effect = ClientDisconnect
+        labels = dict(method="POST", path="/v1/upload/sbom")
+        before_500 = metric_value("pia_http_requests_total", **labels, status="500")
+        before = metric_value(
+            "pia_http_requests_total", **labels, status=metrics.DISCONNECTED_STATUS
+        )
+
+        with pytest.raises(ClientDisconnect):
+            client.post("/v1/upload/sbom", json=valid_request_data)
+
+        assert metric_value(
+            "pia_http_requests_total", **labels, status=metrics.DISCONNECTED_STATUS
+        ) == (before + 1)
+        assert metric_value("pia_http_requests_total", **labels, status="500") == (
+            before_500
+        )
+
+    def test_cancellation_is_not_counted_as_500(self, metric_value):
+        """Cancellation (e.g. on shutdown) is not a server fault either.
+
+        Driven directly: BaseHTTPMiddleware turns a CancelledError raised
+        *inside* the app into "No response returned", so the only way this
+        middleware sees one is from its own await being cancelled.
+        """
+        labels = dict(method="GET", path="<unmatched>")
+        before_500 = metric_value("pia_http_requests_total", **labels, status="500")
+        before = metric_value(
+            "pia_http_requests_total", **labels, status=metrics.DISCONNECTED_STATUS
+        )
+
+        # Imported here: pia.main reads settings at import time, so it must
+        # not be imported before the setup_env fixture has run.
+        from pia.main import record_http_metrics
+
+        async def cancel(_request):
+            raise asyncio.CancelledError
+
+        request = Request({"type": "http", "method": "GET", "headers": []})
+        with pytest.raises(asyncio.CancelledError):
+            asyncio.run(record_http_metrics(request, cancel))
+
+        assert metric_value(
+            "pia_http_requests_total", **labels, status=metrics.DISCONNECTED_STATUS
+        ) == (before + 1)
+        assert metric_value("pia_http_requests_total", **labels, status="500") == (
+            before_500
         )
 
     @patch("pia.main.dependencytrack.upload_sbom")

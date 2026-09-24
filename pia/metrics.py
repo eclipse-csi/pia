@@ -43,6 +43,34 @@ UNMATCHED_PATH = "<unmatched>"
 
 Route templates always start with "/", so this cannot collide with one."""
 
+DISCONNECTED_STATUS = "<disconnected>"
+"""``status`` label for requests that produced no response.
+
+Keeps a client that hangs up mid-request out of the 5xx rate, which would
+otherwise page on a purely client-side abort."""
+
+OTHER_METHOD = "<other>"
+"""``method`` label for requests using a non-standard HTTP method.
+
+Method tokens cannot contain "<", so this cannot collide with one."""
+
+HTTP_METHODS = frozenset(
+    {"GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "CONNECT", "OPTIONS", "TRACE"}
+)
+"""The standard HTTP methods, per RFC 9110 plus PATCH."""
+
+
+def method_label(method: str) -> str:
+    """Bound the ``method`` label to `HTTP_METHODS`.
+
+    The request method reaches the middleware before any routing or method
+    validation, and the HTTP parser accepts any token as a method, so the raw
+    value is caller-controlled and unbounded: without this, anyone can mint
+    permanent series with a single unauthenticated request.
+    """
+    return method if method in HTTP_METHODS else OTHER_METHOD
+
+
 UNREGISTERED_PRODUCT = "_unregistered"
 """``product_name`` label for uploads rejected before the name was resolved.
 

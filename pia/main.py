@@ -1,5 +1,6 @@
 """API endpoints for PIA."""
 
+import asyncio
 import logging
 import time
 from collections.abc import Awaitable, Callable
@@ -11,6 +12,7 @@ from fastapi import Depends, FastAPI, Header, HTTPException, Request, Response, 
 from prometheus_client import CONTENT_TYPE_PLAIN_0_0_4, generate_latest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
+from starlette.requests import ClientDisconnect
 
 from . import __version__, dependencytrack, metrics, oidc
 from .config import Settings
@@ -76,26 +78,33 @@ async def record_http_metrics(
     # Default to 500: an unhandled endpoint exception is turned into a 500 by
     # ServerErrorMiddleware, which wraps *outside* this middleware, so here is
     # the only place that outcome can be recorded. Binding it before the `try`
-    # (rather than in an `except`) also covers BaseExceptions like the
-    # CancelledError raised on client disconnect.
-    status_code = 500
+    # (rather than in an `except`) also covers any BaseException that is not
+    # caught below.
+    status_label: str | int = 500
     start = time.perf_counter()
     try:
         response = await call_next(request)
-        status_code = response.status_code
+        status_label = response.status_code
         return response
+    except (ClientDisconnect, asyncio.CancelledError):
+        # ClientDisconnect: the client hung up while the body was being read.
+        # CancelledError: the ASGI task was cancelled under us, e.g. on server
+        # shutdown. Either way no response was produced, but neither is a
+        # server fault, so keep them out of the 5xx rate an SLO alert watches.
+        status_label = metrics.DISCONNECTED_STATUS
+        raise
     finally:
         duration = time.perf_counter() - start
         # The router writes the matched route into the live scope dict, so it
         # is only readable once the request has been handled.
         route = request.scope.get("route")
         path = route.path if route else metrics.UNMATCHED_PATH
+        # The raw method is caller-controlled; see metrics.method_label.
+        method = metrics.method_label(request.method)
         metrics.HTTP_REQUESTS.labels(
-            method=request.method, path=path, status=str(status_code)
+            method=method, path=path, status=str(status_label)
         ).inc()
-        metrics.HTTP_REQUEST_DURATION.labels(method=request.method, path=path).observe(
-            duration
-        )
+        metrics.HTTP_REQUEST_DURATION.labels(method=method, path=path).observe(duration)
 
 
 def get_session(request: Request):

@@ -412,6 +412,13 @@ database row, never from unvalidated request input:
 
 - `path` is the matched route template, never the raw request path. Requests
   matching no route collapse to `<unmatched>`.
+- `method` is checked against the standard HTTP methods and otherwise collapses
+  to `<other>`. The middleware sees the method before any routing or method
+  validation, and the HTTP parser accepts any token as a method, so the raw
+  value would let an unauthenticated request mint a permanent series.
+- `status` is the response status, or `<disconnected>` when no response was
+  produced because the client hung up or the request was cancelled, so an abort
+  outside our control does not inflate the 5xx rate.
 - `reason` and `outcome` are `Literal` types in `pia/metrics.py`, so mypy
   rejects any value outside the declared set — a new rejection path cannot
   silently widen the metric.
