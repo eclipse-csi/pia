@@ -5,10 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.7.0] - 2026-09-25
+
+### Added
+* `release` and `schedule` GitHub events in allowlist (#99)
 
 ### Fixed
-* Missing timeout on the DependencyTrack upload request
+* Missing timeout on the DependencyTrack upload request (#97)
+* Misc docs and CI (#90, #89, #94)
 
 ## [0.6.0] - 2026-07-29
 
