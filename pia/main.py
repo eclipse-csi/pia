@@ -29,6 +29,9 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+ISSUE_TRACKER_URL = "https://github.com/eclipse-csi/pia/issues"
+"""Pointer included in rejection responses, so callers can ask for a change."""
+
 
 # Load settings
 settings = Settings()
@@ -149,7 +152,13 @@ async def authenticate(
     reason = verify_workload_claims(workload, verified_claims)
     if reason:
         logger.warning(f"Token claims rejected: {reason}")
-        _401("Token claims rejected")
+        # Include reason in response: at this point the caller is a registered
+        # workload holding a verified token, and it needs to know which claim
+        # was rejected to fix its workflow (or submit an issue).
+        _401(
+            f"Token claims rejected: {reason}. If this claim should be "
+            f"accepted, file an issue at {ISSUE_TRACKER_URL}"
+        )
 
     logger.info(
         f"Authenticated workload (project={workload.ef_project_id}, "
