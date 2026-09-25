@@ -224,6 +224,17 @@ Content-Type: application/json
 - `502`: DependencyTrack upload request failed
 - `*`: Relay DependencyTrack status code and body verbatim (non-2xx)
 
+#### GET /livez
+
+Kubernetes liveness probe. Returns `200 OK` with `{"status": "ok"}`.
+
+#### GET /metrics
+
+Prometheus scrape endpoint, served on the application port and
+unauthenticated. Returns the Prometheus text exposition format
+(`text/plain; version=0.0.4; charset=utf-8`). The ingress does not route it
+publicly. See section 5.4 for the metric inventory.
+
 
 ### 4.2 Settings
 
@@ -326,6 +337,7 @@ project bound to a single EF project.
   - Handles token parsing, validation, and signature verification
   - Includes `PyJWKClient` for JWKS key fetching
 - **CLI**: `click`
+- **Metrics**: `prometheus_client` (official Prometheus Python client)
 - **Testing**: `pytest`
 - **Linting**: `ruff`
 - **Python Project Management**: `uv`
@@ -344,6 +356,7 @@ project bound to a single EF project.
   - Pydantic request models: `PiaUploadPayload`, `DependencyTrackUploadPayload`
 - `oidc.py`: OIDC token validation and signature verification using PyJWT
 - `dependencytrack.py`: DependencyTrack API upload client for SBOMs
+- `metrics.py`: Prometheus metric definitions (see section 5.4)
 - `cli.py`: Management CLI for registering Workloads and DependencyTrackProjects
   (see section 5.5)
 
@@ -369,12 +382,60 @@ Log important events:
 - DependencyTrack uploads
 - Errors
 
-Metrics to track:
-- Client connect attempts by IP
-- Client connect attempts by `product_name` and `product_version`
-- Token verification time
-- DependencyTrack upload time
-- Total API response time
+Metrics are exposed in Prometheus text format at `GET /metrics` on the
+application port, unauthenticated. The endpoint is not routed publicly by the
+ingress; Prometheus scrapes it cluster-internally.
+
+| Metric | Type | Labels | Purpose |
+|--------|------|--------|---------|
+| `pia_http_requests_total` | counter | `method`, `path`, `status` | Request volume and error rate |
+| `pia_http_request_duration_seconds` | histogram | `method`, `path` | Total API response time |
+| `pia_upload_rejections_total` | counter | `reason` | Why uploads are rejected with 401 |
+| `pia_token_verification_duration_seconds` | histogram | — | Token verification time |
+| `pia_oidc_fetch_duration_seconds` | histogram | `phase` (`discovery`, `jwks`) | Baseline for the OIDC/JWKS caching in section 10 |
+| `pia_dependencytrack_upload_duration_seconds` | histogram | — | DependencyTrack upload time |
+| `pia_sbom_uploads_total` | counter | `ef_project_id`, `product_name`, `outcome` | Uploads per product and their outcome |
+| `pia_sbom_size_bytes` | histogram | — | Decoded SBOM size |
+| `pia_build_info` | info | `version` | Deployed version |
+
+`prometheus_client` additionally exports its default `process_*` (Linux only),
+`python_gc_*`, and `python_info` collectors.
+
+There is deliberately no `success` value on `pia_upload_rejections_total`: the
+`_401` helper is also reached *after* authentication succeeds (when no
+DependencyTrack project matches), so a success counter on the same metric would
+double-count. Use `pia_http_requests_total` as the denominator and
+`pia_sbom_uploads_total{outcome="success"}` as the success rate.
+
+**Label cardinality.** Every label value comes from a fixed set or from a
+database row, never from unvalidated request input:
+
+- `path` is the matched route template, never the raw request path. Requests
+  matching no route collapse to `<unmatched>`.
+- `method` is checked against the standard HTTP methods and otherwise collapses
+  to `<other>`. The middleware sees the method before any routing or method
+  validation, and the HTTP parser accepts any token as a method, so the raw
+  value would let an unauthenticated request mint a permanent series.
+- `status` is the response status, or `<disconnected>` when no response was
+  produced because the client hung up or the request was cancelled, so an abort
+  outside our control does not inflate the 5xx rate.
+- `reason` and `outcome` are `Literal` types in `pia/metrics.py`, so mypy
+  rejects any value outside the declared set — a new rejection path cannot
+  silently widen the metric.
+- `product_name` is only labeled with a name that resolved to a
+  `DependencyTrackProject` row. Uploads rejected before that resolution are
+  labeled `_unregistered`, because the requested name is caller-controlled.
+- `product_version` is deliberately **not** a label: a new version per release
+  or per commit is unbounded. DependencyTrack is the authoritative index by
+  version.
+- Client IP is deliberately **not** a label, for the same reason (GitHub
+  Actions runners egress from rotating address ranges). Per-IP data is
+  available in the reverse proxy's access log.
+
+**Single worker.** Metrics live in `prometheus_client`'s default in-process
+registry. The container runs one uvicorn worker (see the Dockerfile `CMD`);
+running with `--workers` would require `prometheus_client`'s multiprocess mode.
+Scaling across pods is unaffected — Prometheus aggregates over scrape targets.
 
 ### 5.5 CLI Tool
 
@@ -591,8 +652,10 @@ PIA_EXPECTED_AUDIENCE=pia.eclipse.org  # optional, has default
 
 ## 10. Future Work
 
-- Add caching for oidc config and jwks
-- Add monitoring
+- Add caching for oidc config and jwks. `verify_token` builds a fresh
+  `PyJWKClient` per request, so PyJWT's own key cache never survives a request;
+  `pia_oidc_fetch_duration_seconds{phase}` gives the per-phase before/after
+  baseline.
 - Make upload API async, if sync takes too long
 - Protect against replayed tokens (PyPI uses "jti" claim to track used tokens)
 - Consider product-level authentication
