@@ -146,7 +146,9 @@ class TestVerifyWorkloadClaims:
             issuer="https://ci.eclipse.org/eclipse-other/oidc",
         )
 
-    @pytest.mark.parametrize("event_name", ["push", "workflow_dispatch"])
+    @pytest.mark.parametrize(
+        "event_name", ["push", "workflow_dispatch", "release", "schedule"]
+    )
     def test_github_allowed_event(self, github_workload, event_name):
         assert (
             verify_workload_claims(github_workload, {"event_name": event_name}) is None
@@ -154,7 +156,7 @@ class TestVerifyWorkloadClaims:
 
     @pytest.mark.parametrize(
         "event_name",
-        ["pull_request_target", "workflow_run", "issue_comment", "schedule", "release"],
+        ["pull_request_target", "workflow_run", "issue_comment", "issues", "fork"],
     )
     def test_github_disallowed_event(self, github_workload, event_name):
         reason = verify_workload_claims(github_workload, {"event_name": event_name})

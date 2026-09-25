@@ -27,13 +27,17 @@ Each Eclipse Jenkins project serves its issuer at
 project files list the workload URL (``https://ci.eclipse.org/<name>``); PIA
 appends this suffix."""
 
-GITHUB_ALLOWED_EVENT_NAMES = frozenset({"push", "workflow_dispatch"})
+GITHUB_ALLOWED_EVENT_NAMES = frozenset(
+    {"push", "workflow_dispatch", "release", "schedule"}
+)
 """Allowed values for the GitHub OIDC token's `event_name` claim.
 
-Restricts the OIDC mint to events that require write access to the repo
-(i.e. only maintainers can cause one). Excludes triggers like
-`pull_request_target`, `workflow_run`, and `issue_comment` that can be
-indirectly driven by non-maintainers. Relax on demand."""
+Restricts the OIDC mint to events that only a maintainer can cause: `push`,
+`workflow_dispatch` and `release` all require write access to the repo, and
+`schedule` takes no external input and runs the default branch's workflow
+file. Excludes triggers like `pull_request_target`, `workflow_run`, and
+`issue_comment` that can be indirectly driven by non-maintainers. Relax on
+demand."""
 
 
 NAMING_CONVENTION = {
@@ -293,6 +297,10 @@ def verify_workload_claims(workload: Workload, claims: dict[str, Any]) -> str | 
     """Workload-type-specific claim verification beyond the workload-match step.
 
     Returns a human-readable reason on rejection, or None on success.
+
+    NOTE: The reason is included in the response, so it must not include
+    sensitive information.
+
     """
     if isinstance(workload, GitHubWorkload):
         event_name = claims.get("event_name")

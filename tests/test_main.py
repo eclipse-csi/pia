@@ -158,6 +158,11 @@ class TestAuthenticate:
             self._call(BEARER_TOKEN, seed_db)
         assert exc.value.status_code == 401
         assert "Token claims rejected" in exc.value.detail
+        # The rejected claim and the allowlist are echoed back, so the caller
+        # can fix its workflow or ask for the allowlist to be extended.
+        assert "pull_request_target" in exc.value.detail
+        assert "workflow_dispatch" in exc.value.detail
+        assert "github.com/eclipse-csi/pia/issues" in exc.value.detail
 
     @patch("pia.main.oidc.verify_token")
     @patch("pia.main.jwt.decode")

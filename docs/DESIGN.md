@@ -174,9 +174,10 @@ sequenceDiagram
         check the *unverified* issuer URL to prevent arbitrary requests in steps 3 and 4;
         here we authenticate a workload based on verified token claims)
 6. Workload-Specific Claim Verification
-   - GitHub: `event_name` must be in the allowlist `{push, workflow_dispatch}`.
-     Excludes triggers that can be indirectly driven by non-maintainers
-     (`pull_request_target`, `workflow_run`, `issue_comment`, …).
+   - GitHub: `event_name` must be in the allowlist
+     `{push, workflow_dispatch, release, schedule}`, i.e. events that only a
+     maintainer can cause. Excludes triggers that can be indirectly driven by
+     non-maintainers (`pull_request_target`, `workflow_run`, `issue_comment`, …).
    - Jenkins: no additional checks.
 
 ## 4. API Design
