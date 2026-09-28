@@ -106,3 +106,73 @@ class TestVerifyToken:
 
         with pytest.raises(TokenVerificationError):
             verify_token("token", "issuer", "audience")
+
+
+class TestVerifyTokenMetrics:
+    """Tests for the OIDC phase timers."""
+
+    @patch("pia.oidc.jwt.decode")
+    @patch("pia.oidc.jwt.PyJWKClient")
+    @patch("pia.oidc.requests.get")
+    def test_records_both_phases(self, mock_get, mock_pyjwk, mock_decode, metric_value):
+        mock_signing_key = Mock()
+        mock_signing_key.key = "mock-key"
+        mock_jwks_client = Mock()
+        mock_jwks_client.get_signing_key_from_jwt.return_value = mock_signing_key
+        mock_pyjwk.return_value = mock_jwks_client
+        mock_response = Mock()
+        mock_response.json.return_value = {"jwks_uri": "https://example.com/jwks"}
+        mock_get.return_value = mock_response
+        mock_decode.return_value = {"sub": "test"}
+
+        before_discovery = metric_value(
+            "pia_oidc_fetch_duration_seconds_count", phase="discovery"
+        )
+        before_jwks = metric_value(
+            "pia_oidc_fetch_duration_seconds_count", phase="jwks"
+        )
+        before_total = metric_value("pia_token_verification_duration_seconds_count")
+
+        verify_token("test.jwt.token", "https://example.com", "test-audience")
+
+        assert (
+            metric_value("pia_oidc_fetch_duration_seconds_count", phase="discovery")
+            == before_discovery + 1
+        )
+        assert (
+            metric_value("pia_oidc_fetch_duration_seconds_count", phase="jwks")
+            == before_jwks + 1
+        )
+        assert (
+            metric_value("pia_token_verification_duration_seconds_count")
+            == before_total + 1
+        )
+
+    @patch("pia.oidc.requests.get")
+    def test_failed_discovery_is_still_timed(self, mock_get, metric_value):
+        """A failing phase is timed; the phase that never ran is not."""
+        mock_get.side_effect = requests.RequestException()
+
+        before_discovery = metric_value(
+            "pia_oidc_fetch_duration_seconds_count", phase="discovery"
+        )
+        before_jwks = metric_value(
+            "pia_oidc_fetch_duration_seconds_count", phase="jwks"
+        )
+        before_total = metric_value("pia_token_verification_duration_seconds_count")
+
+        with pytest.raises(TokenVerificationError):
+            verify_token("test.jwt.token", "https://example.com", "test-audience")
+
+        assert (
+            metric_value("pia_oidc_fetch_duration_seconds_count", phase="discovery")
+            == before_discovery + 1
+        )
+        assert (
+            metric_value("pia_oidc_fetch_duration_seconds_count", phase="jwks")
+            == before_jwks
+        )
+        assert (
+            metric_value("pia_token_verification_duration_seconds_count")
+            == before_total + 1
+        )

@@ -112,6 +112,13 @@ jobs:
         fi
         echo "API test passed: /livez responded"
 
+        if ! curl -fs http://localhost:8000/metrics | grep -q '^pia_build_info'; then
+          echo "/metrics did not expose pia_build_info"
+          docker logs pia-test
+          exit 1
+        fi
+        echo "API test passed: /metrics responded"
+
     - name: Clean up
       run: |
         docker stop pia-test || true
