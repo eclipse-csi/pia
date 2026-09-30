@@ -39,7 +39,7 @@ jobs:
         format: cyclonedx-json
         upload-artifact: false
 
-    - uses: eclipse-csi/workflows/upload-sbom@20e3c63807b2bd61b7f1a9f438e5ce588c054efc # main
+    - uses: eclipse-csi/workflows/upload-sbom@20e3c63807b2bd61b7f1a9f438e5ce588c054efc
       with:
         sbom-file: sbom.json
         product-name: ${{ env.NAME }}
