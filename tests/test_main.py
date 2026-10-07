@@ -1,6 +1,8 @@
 """Tests for api module."""
 
 import asyncio
+import base64
+import json
 import logging
 from unittest.mock import Mock, patch
 
@@ -153,6 +155,38 @@ class TestAuthenticate:
             self._call(BEARER_TOKEN, seed_db)
         assert exc.value.status_code == 401
         assert "Token claims rejected" in exc.value.detail
+
+
+def _unsigned_token(claims):
+    """Build an unsigned JWT by hand; PyJWT's encoder rejects a non-string iss."""
+
+    def b64(obj):
+        raw = json.dumps(obj).encode()
+        return base64.urlsafe_b64encode(raw).rstrip(b"=").decode()
+
+    return f"{b64({'alg': 'none', 'typ': 'JWT'})}.{b64(claims)}."
+
+
+class TestNonStringIssuer:
+    """Tokens with a non-string `iss` claim are rejected at the endpoint."""
+
+    @pytest.mark.parametrize(
+        "issuer",
+        [
+            1234,
+            True,
+            ["https://ci.eclipse.org/eclipse-other/oidc"],
+            {"a": 1},
+        ],
+    )
+    def test_issuer_not_allowed(self, client, valid_request_data, issuer):
+        response = client.post(
+            "/v1/upload/sbom",
+            json=valid_request_data,
+            headers={"Authorization": f"Bearer {_unsigned_token({'iss': issuer})}"},
+        )
+        assert response.status_code == 401
+        assert response.json()["detail"] == "Issuer not allowed"
 
 
 class TestUploadSBOMEndpoint:

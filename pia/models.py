@@ -249,6 +249,10 @@ def is_issuer_known(session: Session, issuer: str) -> bool:
     GitHub: issuer must equal GITHUB_ISSUER
     Jenkins: issuer must equal the issuer of a registered JenkinsWorkload in DB
     """
+    # The issuer comes from an unverified token and may be any JSON type
+    if not isinstance(issuer, str):
+        return False
+
     if issuer == GITHUB_ISSUER:
         return True
 

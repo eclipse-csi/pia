@@ -66,6 +66,20 @@ class TestIsIssuerKnown:
     def test_issuer_unknown(self, seed_db, issuer):
         assert not is_issuer_known(seed_db, issuer)
 
+    @pytest.mark.parametrize(
+        "issuer",
+        [
+            # The unverified `iss` claim may be any JSON type.
+            1234,
+            True,
+            [],
+            ["https://ci.eclipse.org/eclipse-other/oidc"],
+            {"a": 1},
+        ],
+    )
+    def test_non_string_issuer_unknown(self, seed_db, issuer):
+        assert not is_issuer_known(seed_db, issuer)
+
 
 class TestFindWorkloadByClaims:
     def test_github_match(self, seed_db):
