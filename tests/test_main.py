@@ -377,6 +377,24 @@ class TestNewlineEscaping:
             "expected escaped newline somewhere in captured logs"
         )
 
+    def test_control_chars_in_product_name_are_escaped(
+        self, client, valid_request_data, authenticate_as_workload, caplog
+    ):
+        valid_request_data["product_name"] = (
+            "x\n2026-04-27 09:00:00,000 - pia.main - INFO - forged\x1b[2J"
+        )
+
+        with caplog.at_level(logging.INFO, logger="pia.main"):
+            response = client.post("/v1/upload/sbom", json=valid_request_data)
+        assert response.status_code == 401
+
+        for record in caplog.records:
+            msg = record.getMessage()
+            assert "\n" not in msg, f"newline leaked into: {msg!r}"
+            assert "\x1b" not in msg, f"ESC leaked into: {msg!r}"
+        assert any("\\n" in r.getMessage() for r in caplog.records)
+        assert any("\\x1b[2J" in r.getMessage() for r in caplog.records)
+
 
 @pytest.mark.usefixtures("setup_env", "authenticate_as_workload")
 class TestHTTPMetrics:

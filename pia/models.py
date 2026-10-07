@@ -275,14 +275,14 @@ def find_workload_by_claims(
     Returns None if no match.
     """
     issuer = token_claims["iss"]
-    logger.info(f"Searching for workload matching issuer '{issuer}' and token claims")
+    logger.info(f"Searching for workload matching issuer {issuer!a} and token claims")
 
     stmt: Select[Any]
     if issuer == GITHUB_ISSUER:
         repository = token_claims.get("repository", "")
         if "/" not in repository:
             logger.info(
-                f"GitHub token missing or malformed 'repository' claim: {repository!r}"
+                f"GitHub token missing or malformed 'repository' claim: {repository!a}"
             )
             return None
         repo_owner, repo_name = repository.split("/", 1)

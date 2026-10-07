@@ -191,7 +191,7 @@ async def authenticate(
         )
         unverified_issuer: str = unverified_claims["iss"]
     except jwt.PyJWTError as e:
-        logger.warning(f"Token decode failed: {e}")
+        logger.warning(f"Token decode failed: {e!a}")
         _401("Invalid token", "invalid_token")
 
     logger.info(f"Unverified issuer extracted: {unverified_issuer!a}")
@@ -207,7 +207,7 @@ async def authenticate(
         _401("Issuer not allowed", "issuer_not_allowed")
 
     logger.info(
-        f"Issuer '{unverified_issuer!a}' is allowed, proceeding with token verification"
+        f"Issuer {unverified_issuer!a} is allowed, proceeding with token verification"
     )
     # Full token verification
     try:
@@ -217,7 +217,7 @@ async def authenticate(
             settings.expected_audience,
         )
     except oidc.TokenVerificationError as e:
-        logger.warning(f"Token verification failed: {e}")
+        logger.warning(f"Token verification failed: {e!a}")
         _401("Token verification failed", "verification_failed")
 
     logger.info("Token signature verified successfully")
@@ -226,14 +226,14 @@ async def authenticate(
     workload = find_workload_by_claims(session, verified_claims)
     if not workload:
         logger.warning(
-            f"No matching workload found for token claims: {verified_claims}"
+            f"No matching workload found for token claims: {verified_claims!a}"
         )
         _401("No matching workload found for token claims", "no_workload")
 
     # Workload-type-specific claim verification (e.g. GitHub event_name allowlist)
     reason = verify_workload_claims(workload, verified_claims)
     if reason:
-        logger.warning(f"Token claims rejected: {reason}")
+        logger.warning(f"Token claims rejected: {reason!a}")
         # Include reason in response: at this point the caller is a registered
         # workload holding a verified token, and it needs to know which claim
         # was rejected to fix its workflow (or submit an issue).
@@ -282,7 +282,7 @@ async def upload_sbom(
     dt_project = find_dt_project(session, workload.ef_project_id, payload.product_name)
     if not dt_project:
         logger.warning(
-            f"No DependencyTrack project '{payload.product_name}' found for "
+            f"No DependencyTrack project {payload.product_name!a} found for "
             f"ef_project_id '{workload.ef_project_id}'"
         )
         # The requested product_name is caller-controlled and unvalidated at
@@ -318,7 +318,7 @@ async def upload_sbom(
                 dt_payload,
             )
     except dependencytrack.DependencyTrackError as e:
-        logger.error(f"DependencyTrack upload failed: {e}")
+        logger.error(f"DependencyTrack upload failed: {e!a}")
         _record_upload(workload, dt_project.name, "dt_request_error")
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
@@ -344,7 +344,7 @@ async def upload_sbom(
         # is NOT safe (it would duplicate the SBOM in DT).
         logger.error(
             f"DependencyTrack returned unparseable success response "
-            f"(status={dt_response.status_code}, body={dt_response.text!r})"
+            f"(status={dt_response.status_code}, body={dt_response.text!a})"
         )
         _record_upload(workload, dt_project.name, "dt_bad_response")
         raise

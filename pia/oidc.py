@@ -24,13 +24,13 @@ def verify_token(
     """Verify JWT token signature using OIDC discovery and return claims.
     Raises TokenVerificationError, if verification fails
     """
-    logger.info(f"Starting token verification for issuer: {issuer}")
+    logger.info(f"Starting token verification for issuer: {issuer!a}")
 
     # 1. Request OIDC configuration from issuer
     config_url = f"{issuer}/.well-known/openid-configuration"
 
     try:
-        logger.info(f"Fetching OIDC configuration from {config_url}")
+        logger.info(f"Fetching OIDC configuration from {config_url!a}")
         with OIDC_FETCH_DURATION.labels(phase="discovery").time():
             response = requests.get(config_url, timeout=10)
             response.raise_for_status()
@@ -47,7 +47,7 @@ def verify_token(
     if not jwks_uri:
         raise TokenVerificationError("OIDC configuration missing 'jwks_uri'")
 
-    logger.info(f"JWKS URI: {jwks_uri}")
+    logger.info(f"JWKS URI: {jwks_uri!a}")
 
     try:
         # 3. Requests public keys from issuer
