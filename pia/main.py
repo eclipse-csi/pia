@@ -9,6 +9,9 @@ from typing import Annotated, NoReturn
 
 import jwt
 from fastapi import Depends, FastAPI, Header, HTTPException, Request, Response, status
+from fastapi.encoders import jsonable_encoder
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
 from prometheus_client import CONTENT_TYPE_PLAIN_0_0_4, generate_latest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
@@ -67,6 +70,23 @@ app = FastAPI(
     lifespan=lifespan,
 )
 logger.info("PIA application initialized successfully")
+
+
+@app.exception_handler(RequestValidationError)
+async def request_validation_exception_handler(
+    request: Request, exc: RequestValidationError
+) -> JSONResponse:
+    """Return 422 like FastAPI's default handler, minus the offending input.
+
+    The default echoes each error's `input`, which for a body sent without a
+    JSON Content-Type is the raw request bytes: non-UTF-8 bytes crash
+    `jsonable_encoder` (500), and any body is reflected back in full, all
+    before authentication. `type`, `loc` and `msg` are enough to fix a request.
+
+    Upstream: https://github.com/fastapi/fastapi/discussions/11923
+    """
+    errors = [{k: v for k, v in e.items() if k != "input"} for e in exc.errors()]
+    return JSONResponse(status_code=422, content={"detail": jsonable_encoder(errors)})
 
 
 @app.middleware("http")
