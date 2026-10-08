@@ -189,6 +189,70 @@ class TestVerifyToken:
         claims = verify_token(make_token(private_key), ISSUER, AUDIENCE)
         assert claims["iss"] == ISSUER
 
+    @pytest.mark.parametrize(
+        "jwks_uri",
+        [
+            "https://evil.example/jwks",
+            "https://ci.eclipse.org.evil.example/proj/oidc/jwks",
+            "http://ci.eclipse.org/proj/oidc/jwks",
+            "https://ci.eclipse.org:9001/proj/oidc/jwks",
+            "https://ci.eclipse.org@evil.example/proj/oidc/jwks",
+            "https://ci.eclipse.org/proj/oidc@evil.example/jwks",
+            "https://ci.eclipse.org/proj/oidc/\\@evil.example/",
+            "https://evil.example\\@ci.eclipse.org/proj/oidc/jwks",
+            "https://ci.eclipse.org/proj/oidcX/jwks",
+            "https://ci.eclipse.org/proj/oidc",
+            "https://ci.eclipse.org/proj/oidc/",
+            "https://ci.eclipse.org/other/oidc/jwks",
+            "https://ci.eclipse.org/proj/oidc/../../other/oidc/jwks",
+            "https://ci.eclipse.org/proj/oidc/./jwks",
+            "https://ci.eclipse.org/proj/oidc/%2e%2e/jwks",
+            "https://ci.eclipse.org/proj/oidc/jwks?x=https://evil.example",
+            "https://ci.eclipse.org/proj/oidc/jwks#frag",
+            "https://ci.eclipse.org/proj/oidc/jwks\n",
+            "https://ci.eclipse.org/proj/oidc/ jwks",
+            "file:///etc/passwd",
+            123,
+            ["https://ci.eclipse.org/proj/oidc/jwks"],
+        ],
+    )
+    @patch("pia.oidc.requests.get")
+    def test_verify_token_jwks_uri_not_under_issuer(self, mock_get, jwks_uri):
+        """Test error, without JWKS fetch, if jwks_uri is not under issuer."""
+        mock_get.return_value = json_response({"jwks_uri": jwks_uri})
+
+        with pytest.raises(TokenVerificationError, match="is not under issuer"):
+            verify_token("token", "https://ci.eclipse.org/proj/oidc", AUDIENCE)
+
+        mock_get.assert_called_once()
+
+    @pytest.mark.parametrize(
+        "issuer, jwks_uri",
+        [
+            (
+                "https://token.actions.githubusercontent.com",
+                "https://token.actions.githubusercontent.com/.well-known/jwks",
+            ),
+            (
+                "https://ci.eclipse.org/proj/oidc",
+                "https://ci.eclipse.org/proj/oidc/jwks",
+            ),
+        ],
+    )
+    @patch("pia.oidc.requests.get")
+    def test_verify_token_jwks_uri_allowed(
+        self, mock_get, private_key, issuer, jwks_uri
+    ):
+        """Test real-world GitHub and Jenkins jwks_uri shapes are accepted."""
+        mock_get.side_effect = [
+            json_response({"jwks_uri": jwks_uri}),
+            json_response({"keys": [make_jwk(private_key)]}),
+        ]
+
+        verify_token(make_token(private_key), issuer, AUDIENCE)
+
+        assert mock_get.call_args_list[1] == call(jwks_uri, timeout=10, stream=True)
+
 
 class TestFetchBounds:
     """Tests for the total deadline and size cap on issuer responses."""

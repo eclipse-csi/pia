@@ -159,7 +159,8 @@ sequenceDiagram
 3. Token Key Discovery
    1. Fetch OIDC configuration from `{issuer}/.well-known/openid-configuration`
       (max. 1 MiB, 10s per-read timeout)
-   2. Extract `jwks_uri` from configuration
+   2. Extract `jwks_uri` from configuration and verify it is a path under
+      `{issuer}/` (string prefix match, no URL parsing)
    3. Fetch public keys from `jwks_uri` (max. 1 MiB, 10s per-read timeout)
    4. Match key using `kid` claim from token header
 4. Token Validation and Signature Verification
