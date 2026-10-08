@@ -3,8 +3,10 @@
 import asyncio
 import logging
 import time
+import uuid
 from collections.abc import Awaitable, Callable
 from contextlib import asynccontextmanager
+from contextvars import ContextVar
 from typing import Annotated, NoReturn
 
 import jwt
@@ -31,10 +33,29 @@ from .models import (
     verify_workload_claims,
 )
 
+request_id: ContextVar[str] = ContextVar("request_id", default="-")
+"""ID of the HTTP request being handled, set by `assign_request_id`."""
+
+_default_record_factory = logging.getLogRecordFactory()
+
+
+def _record_factory(*args, **kwargs) -> logging.LogRecord:
+    """Stamp every log record with the current request ID.
+
+    A record factory (rather than a handler filter) makes the attribute
+    available to any handler, including pytest's caplog. Outside a request,
+    e.g. at startup, the ID is "-".
+    """
+    record = _default_record_factory(*args, **kwargs)
+    record.request_id = request_id.get()
+    return record
+
+
 # Configure logging
+logging.setLogRecordFactory(_record_factory)
 logging.basicConfig(
     level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    format="%(asctime)s - %(name)s - %(levelname)s - %(request_id)s - %(message)s",
 )
 logger = logging.getLogger(__name__)
 
@@ -125,6 +146,30 @@ async def record_http_metrics(
             method=method, path=path, status=str(status_label)
         ).inc()
         metrics.HTTP_REQUEST_DURATION.labels(method=method, path=path).observe(duration)
+
+
+# Registered after `record_http_metrics`, so it wraps it and its ID covers all
+# logs of the request. NOTE: uvicorn's access log and the traceback of an
+# unhandled exception (logged by ServerErrorMiddleware, outside this one) do
+# not carry the ID.
+@app.middleware("http")
+async def assign_request_id(
+    request: Request,
+    call_next: Callable[[Request], Awaitable[Response]],
+) -> Response:
+    """Assign a request ID for log correlation and return it as X-Request-ID.
+
+    The ID is always generated here, never taken from an inbound header, which
+    would let callers spoof IDs or inject into logs.
+    """
+    rid = uuid.uuid4().hex[:16]
+    token = request_id.set(rid)
+    try:
+        response = await call_next(request)
+        response.headers["X-Request-ID"] = rid
+        return response
+    finally:
+        request_id.reset(token)
 
 
 def get_session(request: Request):

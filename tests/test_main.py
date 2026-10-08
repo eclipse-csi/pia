@@ -522,6 +522,51 @@ class TestNewlineEscaping:
         assert any("\\x1b[2J" in r.getMessage() for r in caplog.records)
 
 
+@pytest.mark.usefixtures("setup_env")
+class TestRequestId:
+    """Tests for the request ID middleware and log record stamping."""
+
+    def test_response_carries_fresh_request_id(self, client):
+        first = client.get("/livez").headers["X-Request-ID"]
+        second = client.get("/livez").headers["X-Request-ID"]
+        assert len(first) == 16
+        int(first, 16)
+        assert first != second
+
+    def test_inbound_request_id_is_ignored(self, client):
+        response = client.get("/livez", headers={"X-Request-ID": "spoofed"})
+        assert response.headers["X-Request-ID"] != "spoofed"
+
+    @patch("pia.main.dependencytrack.upload_sbom")
+    def test_log_records_carry_request_id(
+        self,
+        mock_upload,
+        client,
+        valid_request_data,
+        authenticate_as_workload,
+        caplog,
+    ):
+        mock_dt_response = Mock()
+        mock_dt_response.ok = True
+        mock_dt_response.status_code = 200
+        mock_dt_response.json.return_value = {"token": "dt-token-abc"}
+        mock_upload.return_value = mock_dt_response
+
+        with caplog.at_level(logging.INFO, logger="pia.main"):
+            response = client.post("/v1/upload/sbom", json=valid_request_data)
+
+        records = [r for r in caplog.records if r.name == "pia.main"]
+        assert records
+        assert {r.request_id for r in records} == {response.headers["X-Request-ID"]}
+
+    def test_log_records_outside_request_get_placeholder(self, caplog):
+        from pia.main import logger
+
+        with caplog.at_level(logging.INFO, logger="pia.main"):
+            logger.info("outside a request")
+        assert caplog.records[-1].request_id == "-"
+
+
 @pytest.mark.usefixtures("setup_env", "authenticate_as_workload")
 class TestHTTPMetrics:
     """Tests for the request-counting middleware."""
