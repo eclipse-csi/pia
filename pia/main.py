@@ -152,6 +152,30 @@ def _401(msg: str, reason: RejectionReason) -> NoReturn:
     )
 
 
+LOGGED_CLAIMS = (
+    "iss",
+    "sub",
+    "repository",
+    "repository_owner_id",
+    "workflow_ref",
+    "event_name",
+    "ref",
+)
+"""Claims identifying a workload, logged when no registered workload matches.
+
+An allowlist keeps personal data (e.g. GitHub `actor`) and noise out of logs.
+"""
+
+
+def _claims_summary(claims: dict) -> str:
+    """Format the LOGGED_CLAIMS present in `claims`, escaped for logging.
+
+    Claim values are signed by the issuer, but chosen in part by whoever
+    triggers the workload (e.g. a branch name in `ref`), so they are escaped.
+    """
+    return ", ".join(f"{k}={claims[k]!a}" for k in LOGGED_CLAIMS if k in claims)
+
+
 def _record_upload(
     workload: Workload,
     product_name: str,
@@ -181,8 +205,6 @@ async def authenticate(
         _401("Invalid Authorization header format", "invalid_header")
     token = authorization[7:]  # Remove "Bearer " prefix
 
-    logger.info("Bearer token extracted from Authorization header")
-
     # Extract issuer from unverified token
     try:
         unverified_claims = jwt.decode(
@@ -194,8 +216,6 @@ async def authenticate(
         logger.warning(f"Token decode failed: {e!a}")
         _401("Invalid token", "invalid_token")
 
-    logger.info(f"Unverified issuer extracted: {unverified_issuer!a}")
-
     # Pre-verification check. The issuer URL from the unverified token is used
     # for OIDC discovery and JWKs requests. It MUST NOT be chosen freely by an
     # untrusted caller (CWE-918).
@@ -206,9 +226,7 @@ async def authenticate(
         logger.warning(f"Issuer {unverified_issuer!a} not allowed")
         _401("Issuer not allowed", "issuer_not_allowed")
 
-    logger.info(
-        f"Issuer {unverified_issuer!a} is allowed, proceeding with token verification"
-    )
+    logger.info(f"Issuer {unverified_issuer!a} allowed")
     # Full token verification
     try:
         verified_claims = oidc.verify_token(
@@ -226,14 +244,23 @@ async def authenticate(
     workload = find_workload_by_claims(session, verified_claims)
     if not workload:
         logger.warning(
-            f"No matching workload found for token claims: {verified_claims!a}"
+            f"No matching workload found for token claims: "
+            f"{_claims_summary(verified_claims)}"
         )
         _401("No matching workload found for token claims", "no_workload")
+
+    logger.info(
+        f"Matched workload (project={workload.ef_project_id}, "
+        f"type={workload.type}, id={workload.id})"
+    )
 
     # Workload-type-specific claim verification (e.g. GitHub event_name allowlist)
     reason = verify_workload_claims(workload, verified_claims)
     if reason:
-        logger.warning(f"Token claims rejected: {reason!a}")
+        logger.warning(
+            f"Token claims rejected for workload (project={workload.ef_project_id}, "
+            f"id={workload.id}): {reason!a}"
+        )
         # Include reason in response: at this point the caller is a registered
         # workload holding a verified token, and it needs to know which claim
         # was rejected to fix its workflow (or submit an issue).
@@ -242,11 +269,6 @@ async def authenticate(
             f"accepted, file an issue at {ISSUE_TRACKER_URL}",
             "claims_rejected",
         )
-
-    logger.info(
-        f"Authenticated workload (project={workload.ef_project_id}, "
-        f"type={workload.type}, id={workload.id})"
-    )
 
     return workload
 
@@ -290,15 +312,18 @@ async def upload_sbom(
         _record_upload(workload, metrics.UNREGISTERED_PRODUCT, "no_dt_project")
         _401("No matching DependencyTrack project found", "no_dt_project")
 
-    logger.info(
-        f"Resolved DependencyTrack project '{dt_project.name}' "
-        f"(parent_uuid={dt_project.parent_uuid})"
-    )
-
     # payload.bom is base64; derive the decoded size arithmetically rather than
     # decoding a multi-MB string just to measure it. Observed before the upload
     # so the size is recorded even when DependencyTrack rejects it.
-    metrics.SBOM_SIZE.observe(len(payload.bom) * 3 // 4)
+    sbom_size = len(payload.bom) * 3 // 4
+    metrics.SBOM_SIZE.observe(sbom_size)
+
+    logger.info(
+        f"Resolved DependencyTrack project '{dt_project.name}' "
+        f"(parent_uuid={dt_project.parent_uuid}), uploading "
+        f"version={payload.product_version!a}, is_latest={payload.is_latest}, "
+        f"size={sbom_size}"
+    )
 
     # Build DependencyTrack payload
     dt_payload = DependencyTrackUploadPayload(
@@ -328,6 +353,11 @@ async def upload_sbom(
     # Relay DT failures verbatim; on success, return the polling URL the
     # publisher should query for processing status.
     if not dt_response.ok:
+        # The body may echo caller-supplied SBOM content; escape and truncate.
+        logger.warning(
+            f"DependencyTrack rejected upload "
+            f"(status={dt_response.status_code}, body={dt_response.content[:500]!a})"
+        )
         _record_upload(workload, dt_project.name, "dt_http_error")
         return Response(
             content=dt_response.content,
@@ -350,6 +380,10 @@ async def upload_sbom(
         raise
 
     _record_upload(workload, dt_project.name, "success")
+    logger.info(
+        f"SBOM uploaded (project='{dt_project.name}', "
+        f"version={payload.product_version!a}, dt_token={token!a})"
+    )
 
     dt_url = str(settings.dependency_track_url).rstrip("/")
     return PiaUploadResponse(
