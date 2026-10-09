@@ -230,9 +230,36 @@ class TestUploadSBOMEndpoint:
 
     def test_upload_invalid_json(self, client, authenticate_as_workload):
         """Error with invalid JSON."""
+        response = client.post(
+            "/v1/upload/sbom",
+            content=b"not-json",
+            headers={"Content-Type": "application/json"},
+        )
+        assert response.status_code == 422
+        assert response.json()["detail"][0]["type"] == "json_invalid"
+
+    def test_upload_no_content_type(self, client, authenticate_as_workload):
+        """Error with a body sent without a JSON Content-Type."""
         response = client.post("/v1/upload/sbom", content=b"not-json")
         assert response.status_code == 422
-        assert b"JSON" in response.content or b"json" in response.content
+        assert response.json()["detail"][0]["type"] == "model_attributes_type"
+
+    def test_upload_non_utf8_body(self, client, authenticate_as_workload):
+        """Non-UTF-8 body without a JSON Content-Type is a 422, not a 500.
+
+        https://github.com/fastapi/fastapi/discussions/11923
+        """
+        response = client.post("/v1/upload/sbom", content=b"\xcf\xcf\xcf")
+        assert response.status_code == 422
+
+    def test_upload_validation_error_omits_input(
+        self, client, authenticate_as_workload
+    ):
+        """Validation errors don't echo the request body back."""
+        response = client.post("/v1/upload/sbom", content=b"a" * 1_000_000)
+        assert response.status_code == 422
+        assert len(response.content) < 1_000
+        assert all("input" not in e for e in response.json()["detail"])
 
     def test_upload_missing_field(
         self, client, valid_request_data, authenticate_as_workload

@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+* 500 on upload validation errors with a non-UTF-8 body, and request body
+  echoed back in validation error responses
+
 ## [0.8.0] - 2026-09-28
 
 ### Added
