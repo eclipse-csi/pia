@@ -50,7 +50,9 @@ class TestVerifyToken:
         )
 
         # Assert public keys request
-        mock_pyjwk.assert_called_once_with("https://example.com/.well-known/jwks")
+        mock_pyjwk.assert_called_once_with(
+            "https://example.com/.well-known/jwks", timeout=10
+        )
 
         # Assert jwt.decode call
         mock_decode.assert_called_once_with(

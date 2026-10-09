@@ -2,8 +2,10 @@
 
 import asyncio
 import base64
+import inspect
 import json
 import logging
+import threading
 from unittest.mock import Mock, patch
 
 import jwt
@@ -52,7 +54,7 @@ class TestAuthenticate:
     def _call(self, authorization, session):
         from pia.main import authenticate
 
-        return asyncio.run(authenticate(authorization, session))
+        return authenticate(authorization, session)
 
     def test_invalid_authorization_header(self, seed_db):
         """Error when Authorization header doesn't start with 'Bearer '."""
@@ -492,7 +494,7 @@ class TestNewlineEscaping:
             caplog.at_level(logging.INFO, logger="pia.main"),
             pytest.raises(HTTPException),
         ):
-            asyncio.run(authenticate(BEARER_TOKEN, seed_db))
+            authenticate(BEARER_TOKEN, seed_db)
 
         for record in caplog.records:
             msg = record.getMessage()
@@ -589,6 +591,71 @@ class TestRequestId:
         with caplog.at_level(logging.INFO, logger="pia.main"):
             logger.info("outside a request")
         assert caplog.records[-1].request_id == "-"
+
+
+@pytest.mark.usefixtures("setup_env")
+class TestBlockingIO:
+    """Blocking I/O must not run on the event loop."""
+
+    def test_endpoints_are_sync(self):
+        """Plain `def` makes FastAPI run them in its threadpool."""
+        from pia.main import authenticate, upload_sbom
+
+        assert not inspect.iscoroutinefunction(authenticate)
+        assert not inspect.iscoroutinefunction(upload_sbom)
+
+    @patch("pia.main.oidc.verify_token")
+    @patch("pia.main.jwt.decode")
+    def test_slow_issuer_does_not_stall_other_requests(
+        self, mock_decode, mock_verify, client, valid_request_data, caplog
+    ):
+        """/livez answers while an upload hangs in OIDC verification, and the
+        upload's log records, emitted in a worker thread, keep its request ID."""
+        mock_decode.return_value = {"iss": GITHUB_ISSUER}
+        entered, release = threading.Event(), threading.Event()
+
+        def slow_verify(*args):
+            entered.set()
+            release.wait(timeout=10)
+            raise TokenVerificationError("issuer timed out")
+
+        mock_verify.side_effect = slow_verify
+        responses = {}
+
+        def upload():
+            responses["upload"] = client.post(
+                "/v1/upload/sbom",
+                json=valid_request_data,
+                headers={"Authorization": BEARER_TOKEN},
+            )
+
+        def livez():
+            responses["livez"] = client.get("/livez")
+
+        uploader = threading.Thread(target=upload)
+        prober = threading.Thread(target=livez)
+        with caplog.at_level(logging.INFO, logger="pia.main"):
+            uploader.start()
+            try:
+                assert entered.wait(timeout=5)
+                prober.start()
+                # Joined with a timeout, so a regression fails instead of
+                # deadlocking: the stalled loop would only free up on release.
+                prober.join(timeout=2)
+                assert not prober.is_alive(), "/livez stalled behind the upload"
+                assert responses["livez"].status_code == 200
+            finally:
+                release.set()
+                uploader.join(timeout=10)
+                prober.join(timeout=10)
+
+        assert responses["upload"].status_code == 401
+        rid = responses["upload"].headers["X-Request-ID"]
+        auth_records = [
+            r for r in caplog.records if r.getMessage().startswith("Issuer ")
+        ]
+        assert auth_records
+        assert {r.request_id for r in auth_records} == {rid}
 
 
 @pytest.mark.usefixtures("setup_env", "authenticate_as_workload")
@@ -862,7 +929,7 @@ class TestRejectionReasons:
         from pia.main import authenticate
 
         with pytest.raises(HTTPException):
-            asyncio.run(authenticate(authorization, seed_db))
+            authenticate(authorization, seed_db)
 
     def test_invalid_header(self, seed_db, metric_value):
         before = metric_value("pia_upload_rejections_total", reason="invalid_header")
@@ -962,7 +1029,7 @@ class TestRejectionReasons:
             metric_value("pia_upload_rejections_total", reason=r) for r in reasons
         )
 
-        asyncio.run(authenticate(BEARER_TOKEN, seed_db))
+        authenticate(BEARER_TOKEN, seed_db)
 
         after = sum(
             metric_value("pia_upload_rejections_total", reason=r) for r in reasons

@@ -10,6 +10,13 @@ from .metrics import OIDC_FETCH_DURATION, TOKEN_VERIFICATION_DURATION
 
 logger = logging.getLogger(__name__)
 
+TIMEOUT = 10
+"""Timeout for the OIDC discovery and JWKS requests to the issuer, in seconds.
+
+Verification runs before the caller is authenticated, and each request holds a
+threadpool worker for as long as the issuer takes to answer. PyJWKClient would
+otherwise default to 30 seconds."""
+
 
 class TokenVerificationError(Exception):
     """Raised when token verification fails."""
@@ -30,7 +37,7 @@ def verify_token(
     try:
         logger.debug(f"Fetching OIDC configuration from {config_url!a}")
         with OIDC_FETCH_DURATION.labels(phase="discovery").time():
-            response = requests.get(config_url, timeout=10)
+            response = requests.get(config_url, timeout=TIMEOUT)
             response.raise_for_status()
             oidc_config = response.json()
         logger.debug("OIDC configuration fetched successfully")
@@ -51,7 +58,7 @@ def verify_token(
         # 3. Requests public keys from issuer
         logger.debug("Fetching signing key from JWKS endpoint")
         with OIDC_FETCH_DURATION.labels(phase="jwks").time():
-            jwks_client = jwt.PyJWKClient(jwks_uri)
+            jwks_client = jwt.PyJWKClient(jwks_uri, timeout=TIMEOUT)
             signing_key = jwks_client.get_signing_key_from_jwt(token)
         logger.debug("Signing key retrieved successfully")
 
