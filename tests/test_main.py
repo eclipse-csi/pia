@@ -156,6 +156,79 @@ class TestAuthenticate:
         assert exc.value.status_code == 401
         assert "Token claims rejected" in exc.value.detail
 
+    @patch("pia.main.oidc.verify_token")
+    @patch("pia.main.jwt.decode")
+    def test_no_matching_workload_logs_escaped_claims_summary(
+        self, mock_decode, mock_verify, seed_db, caplog
+    ):
+        """Only allowlisted claims are logged, and their values are escaped."""
+        mock_decode.return_value = {"iss": GITHUB_ISSUER}
+        mock_verify.return_value = {
+            "iss": GITHUB_ISSUER,
+            "repository": "eclipse-test/wrong-repo",
+            "repository_owner_id": "42",
+            "ref": "refs/heads/x\n2026-04-27 09:00:00,000 - forged\x1b[2J",
+            "actor": "octocat",
+        }
+        with (
+            caplog.at_level(logging.INFO, logger="pia.main"),
+            pytest.raises(HTTPException),
+        ):
+            self._call(BEARER_TOKEN, seed_db)
+
+        assert "repository='eclipse-test/wrong-repo'" in caplog.text
+        assert "octocat" not in caplog.text
+        for record in caplog.records:
+            msg = record.getMessage()
+            assert "\n" not in msg, f"newline leaked into: {msg!r}"
+            assert "\x1b" not in msg, f"ESC leaked into: {msg!r}"
+        assert any("\\x1b[2J" in r.getMessage() for r in caplog.records)
+
+    @patch("pia.main.oidc.verify_token")
+    @patch("pia.main.jwt.decode")
+    def test_claims_rejected_logs_workload(
+        self, mock_decode, mock_verify, seed_db, caplog
+    ):
+        """The rejection warning identifies the workload on its own line."""
+        workload = seed_db.query(GitHubWorkload).filter_by(repo_name="repo").one()
+        mock_decode.return_value = {"iss": GITHUB_ISSUER}
+        mock_verify.return_value = {
+            "iss": GITHUB_ISSUER,
+            "repository": "eclipse-test/repo",
+            "repository_owner_id": "42",
+            "event_name": "pull_request_target",
+        }
+        with (
+            caplog.at_level(logging.INFO, logger="pia.main"),
+            pytest.raises(HTTPException),
+        ):
+            self._call(BEARER_TOKEN, seed_db)
+
+        [warning] = [r for r in caplog.records if r.levelno == logging.WARNING]
+        msg = warning.getMessage()
+        assert "Token claims rejected" in msg
+        assert f"project=eclipse-test, id={workload.id}" in msg
+        assert "pull_request_target" in msg
+
+    @patch("pia.main.oidc.verify_token")
+    @patch("pia.main.jwt.decode")
+    def test_success_logs_matched_workload(
+        self, mock_decode, mock_verify, seed_db, caplog
+    ):
+        mock_decode.return_value = {"iss": GITHUB_ISSUER}
+        mock_verify.return_value = {
+            "iss": GITHUB_ISSUER,
+            "repository": "eclipse-test/repo",
+            "repository_owner_id": "42",
+            "event_name": "push",
+        }
+        with caplog.at_level(logging.INFO, logger="pia.main"):
+            workload = self._call(BEARER_TOKEN, seed_db)
+        assert (
+            f"Matched workload (project=eclipse-test, type={workload.type}, "
+            f"id={workload.id})" in caplog.text
+        )
+
 
 def _unsigned_token(claims):
     """Build an unsigned JWT by hand; PyJWT's encoder rejects a non-string iss."""
@@ -223,11 +296,9 @@ class TestUploadSBOMEndpoint:
         authenticate_as_workload,
         caplog,
     ):
-        """A 2xx DT response without a 'token' field propagates an error.
+        """A 2xx DT response without a 'token' field yields a 500.
 
-        TestClient re-raises server exceptions; in production FastAPI's ASGI
-        server converts them to 500. Either way the publisher does not get
-        a misleading 200.
+        The publisher must not get a misleading 200.
         """
         mock_dt_response = Mock()
         mock_dt_response.ok = True
@@ -236,8 +307,8 @@ class TestUploadSBOMEndpoint:
         mock_dt_response.text = '{"unexpected": "shape"}'
         mock_upload.return_value = mock_dt_response
 
-        with pytest.raises(KeyError):
-            client.post("/v1/upload/sbom", json=valid_request_data)
+        response = client.post("/v1/upload/sbom", json=valid_request_data)
+        assert response.status_code == 500
 
         assert "unparseable success response" in caplog.text
         assert "unexpected" in caplog.text
@@ -261,6 +332,59 @@ class TestUploadSBOMEndpoint:
 
         assert response.status_code == 400
         assert response.content == b'{"detail":"invalid bom"}'
+
+    @patch("pia.main.dependencytrack.upload_sbom")
+    def test_upload_dt_non_ok_logged_escaped(
+        self,
+        mock_upload,
+        client,
+        valid_request_data,
+        authenticate_as_workload,
+        caplog,
+    ):
+        """Non-2xx DT responses are logged, with the body escaped."""
+        mock_dt_response = Mock()
+        mock_dt_response.ok = False
+        mock_dt_response.status_code = 400
+        mock_dt_response.content = b'{"detail":"bad\n2026 - forged"}'
+        mock_upload.return_value = mock_dt_response
+
+        with caplog.at_level(logging.INFO, logger="pia.main"):
+            client.post("/v1/upload/sbom", json=valid_request_data)
+
+        [warning] = [r for r in caplog.records if r.levelno == logging.WARNING]
+        msg = warning.getMessage()
+        assert "DependencyTrack rejected upload (status=400" in msg
+        assert "\n" not in msg
+        assert "bad\\n2026" in msg
+
+    @patch("pia.main.dependencytrack.upload_sbom")
+    def test_upload_success_logged_escaped(
+        self,
+        mock_upload,
+        client,
+        valid_request_data,
+        authenticate_as_workload,
+        caplog,
+    ):
+        """Successful uploads are logged, with the caller's version escaped."""
+        valid_request_data["product_version"] = "1.0\n2026 - forged\x1b[2J"
+        mock_dt_response = Mock()
+        mock_dt_response.ok = True
+        mock_dt_response.status_code = 200
+        mock_dt_response.json.return_value = {"token": "dt-token-abc"}
+        mock_upload.return_value = mock_dt_response
+
+        with caplog.at_level(logging.INFO, logger="pia.main"):
+            response = client.post("/v1/upload/sbom", json=valid_request_data)
+        assert response.status_code == 200
+
+        assert "SBOM uploaded" in caplog.text
+        assert "dt_token='dt-token-abc'" in caplog.text
+        for record in caplog.records:
+            msg = record.getMessage()
+            assert "\n" not in msg, f"newline leaked into: {msg!r}"
+            assert "\x1b" not in msg, f"ESC leaked into: {msg!r}"
 
     def test_upload_invalid_json(self, client, authenticate_as_workload):
         """Error with invalid JSON."""
@@ -376,6 +500,95 @@ class TestNewlineEscaping:
         assert any("\\n" in r.getMessage() for r in caplog.records), (
             "expected escaped newline somewhere in captured logs"
         )
+
+    def test_control_chars_in_product_name_are_escaped(
+        self, client, valid_request_data, authenticate_as_workload, caplog
+    ):
+        valid_request_data["product_name"] = (
+            "x\n2026-04-27 09:00:00,000 - pia.main - INFO - forged\x1b[2J"
+        )
+
+        with caplog.at_level(logging.INFO, logger="pia.main"):
+            response = client.post("/v1/upload/sbom", json=valid_request_data)
+        assert response.status_code == 401
+
+        for record in caplog.records:
+            msg = record.getMessage()
+            assert "\n" not in msg, f"newline leaked into: {msg!r}"
+            assert "\x1b" not in msg, f"ESC leaked into: {msg!r}"
+        assert any("\\n" in r.getMessage() for r in caplog.records)
+        assert any("\\x1b[2J" in r.getMessage() for r in caplog.records)
+
+
+@pytest.mark.usefixtures("setup_env")
+class TestRequestId:
+    """Tests for the request ID middleware and log record stamping."""
+
+    def test_response_carries_fresh_request_id(self, client):
+        first = client.get("/livez").headers["X-Request-ID"]
+        second = client.get("/livez").headers["X-Request-ID"]
+        assert len(first) == 16
+        int(first, 16)
+        assert first != second
+
+    def test_inbound_request_id_is_ignored(self, client):
+        response = client.get("/livez", headers={"X-Request-ID": "spoofed"})
+        assert response.headers["X-Request-ID"] != "spoofed"
+
+    @patch("pia.main.dependencytrack.upload_sbom")
+    def test_log_records_carry_request_id(
+        self,
+        mock_upload,
+        client,
+        valid_request_data,
+        authenticate_as_workload,
+        caplog,
+    ):
+        mock_dt_response = Mock()
+        mock_dt_response.ok = True
+        mock_dt_response.status_code = 200
+        mock_dt_response.json.return_value = {"token": "dt-token-abc"}
+        mock_upload.return_value = mock_dt_response
+
+        with caplog.at_level(logging.INFO, logger="pia.main"):
+            response = client.post("/v1/upload/sbom", json=valid_request_data)
+
+        records = [r for r in caplog.records if r.name == "pia.main"]
+        assert records
+        assert {r.request_id for r in records} == {response.headers["X-Request-ID"]}
+
+    @patch("pia.main.dependencytrack.upload_sbom")
+    def test_unhandled_exception_carries_request_id(
+        self,
+        mock_upload,
+        client,
+        valid_request_data,
+        authenticate_as_workload,
+        caplog,
+    ):
+        """The 500 and the logged traceback of an unhandled exception share
+        the request ID, so they can be correlated."""
+        mock_dt_response = Mock()
+        mock_dt_response.ok = True
+        mock_dt_response.status_code = 200
+        mock_dt_response.json.return_value = {"unexpected": "shape"}
+        mock_dt_response.text = '{"unexpected": "shape"}'
+        mock_upload.return_value = mock_dt_response
+
+        response = client.post("/v1/upload/sbom", json=valid_request_data)
+
+        assert response.status_code == 500
+        rid = response.headers["X-Request-ID"]
+        tracebacks = [r for r in caplog.records if r.exc_info]
+        assert tracebacks
+        assert {r.request_id for r in tracebacks} == {rid}
+
+    def test_log_records_outside_request_get_placeholder(self, caplog):
+        from pia.main import logger
+
+        with caplog.at_level(logging.INFO, logger="pia.main"):
+            logger.info("outside a request")
+        assert caplog.records[-1].request_id == "-"
 
 
 @pytest.mark.usefixtures("setup_env", "authenticate_as_workload")
@@ -538,8 +751,8 @@ class TestHTTPMetrics:
         labels = dict(method="POST", path="/v1/upload/sbom", status="500")
         before = metric_value("pia_http_requests_total", **labels)
 
-        with pytest.raises(KeyError):
-            client.post("/v1/upload/sbom", json=valid_request_data)
+        response = client.post("/v1/upload/sbom", json=valid_request_data)
+        assert response.status_code == 500
 
         assert metric_value("pia_http_requests_total", **labels) == before + 1
 

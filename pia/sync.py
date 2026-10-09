@@ -179,14 +179,14 @@ def fetch_github_owner_id(owner: str, token: str | None = None) -> str:
     limit (only public read is needed for ``GET /users/{owner}``).
     """
     url = f"https://api.github.com/users/{owner}"
-    logger.info(f"Fetching GitHub owner id from {url}")
+    logger.info(f"Fetching GitHub owner id from {url!a}")
     headers = {"Accept": "application/vnd.github+json"}
     if token:
         headers["Authorization"] = f"Bearer {token}"
     response = requests.get(url, headers=headers)
     response.raise_for_status()
     owner_id = str(response.json()["id"])
-    logger.info(f"GitHub owner {owner!r} has id {owner_id}")
+    logger.info(f"GitHub owner {owner!a} has id {owner_id!a}")
     return owner_id
 
 
@@ -195,7 +195,7 @@ def _dt_search_root_projects(
 ) -> list[dict[str, Any]]:
     """Return all root DependencyTrack projects with the given name."""
     url = f"{dt_url.rstrip('/')}/api/v1/project"
-    logger.info(f"Querying DependencyTrack root projects at {url} for name={name!r}")
+    logger.info(f"Querying DependencyTrack root projects at {url} for name={name!a}")
     response = requests.get(
         url,
         params={"name": name, "onlyRoot": "true"},
@@ -213,8 +213,8 @@ def _dt_create_project(
     Root projects aggregate their direct children; non-root aggregate direct
     children marked as latest.
     """
-    where = f"under parent {parent_uuid}" if parent_uuid else "(root)"
-    logger.info(f"Creating DependencyTrack project {name!r} {where}")
+    where = f"under parent {parent_uuid!a}" if parent_uuid else "(root)"
+    logger.info(f"Creating DependencyTrack project {name!a} {where}")
     body: dict[str, Any] = {"name": name}
     if parent_uuid:
         body["parent"] = {"uuid": parent_uuid}
