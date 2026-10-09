@@ -13,7 +13,7 @@ import jwt
 from fastapi import Depends, FastAPI, Header, HTTPException, Request, Response, status
 from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, PlainTextResponse
 from prometheus_client import CONTENT_TYPE_PLAIN_0_0_4, generate_latest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
@@ -117,7 +117,7 @@ async def record_http_metrics(
 ) -> Response:
     """Count and time every HTTP request, labeled by matched route template."""
     # Default to 500: an unhandled endpoint exception is turned into a 500 by
-    # ServerErrorMiddleware, which wraps *outside* this middleware, so here is
+    # `assign_request_id`, which wraps *outside* this middleware, so here is
     # the only place that outcome can be recorded. Binding it before the `try`
     # (rather than in an `except`) also covers any BaseException that is not
     # caught below.
@@ -149,9 +149,7 @@ async def record_http_metrics(
 
 
 # Registered after `record_http_metrics`, so it wraps it and its ID covers all
-# logs of the request. NOTE: uvicorn's access log and the traceback of an
-# unhandled exception (logged by ServerErrorMiddleware, outside this one) do
-# not carry the ID.
+# logs of the request. NOTE: uvicorn's access log does not carry the ID.
 @app.middleware("http")
 async def assign_request_id(
     request: Request,
@@ -165,7 +163,17 @@ async def assign_request_id(
     rid = uuid.uuid4().hex[:16]
     token = request_id.set(rid)
     try:
-        response = await call_next(request)
+        try:
+            response = await call_next(request)
+        except ClientDisconnect:
+            # No one to respond to, and not a server fault; see
+            # record_http_metrics.
+            raise
+        except Exception:
+            # Handled here rather than by ServerErrorMiddleware (outside this
+            # one), so that the traceback and the 500 both carry the ID.
+            logger.exception("Unhandled exception")
+            response = PlainTextResponse("Internal Server Error", status_code=500)
         response.headers["X-Request-ID"] = rid
         return response
     finally:

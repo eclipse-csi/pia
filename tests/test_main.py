@@ -296,11 +296,9 @@ class TestUploadSBOMEndpoint:
         authenticate_as_workload,
         caplog,
     ):
-        """A 2xx DT response without a 'token' field propagates an error.
+        """A 2xx DT response without a 'token' field yields a 500.
 
-        TestClient re-raises server exceptions; in production FastAPI's ASGI
-        server converts them to 500. Either way the publisher does not get
-        a misleading 200.
+        The publisher must not get a misleading 200.
         """
         mock_dt_response = Mock()
         mock_dt_response.ok = True
@@ -309,8 +307,8 @@ class TestUploadSBOMEndpoint:
         mock_dt_response.text = '{"unexpected": "shape"}'
         mock_upload.return_value = mock_dt_response
 
-        with pytest.raises(KeyError):
-            client.post("/v1/upload/sbom", json=valid_request_data)
+        response = client.post("/v1/upload/sbom", json=valid_request_data)
+        assert response.status_code == 500
 
         assert "unparseable success response" in caplog.text
         assert "unexpected" in caplog.text
@@ -559,6 +557,32 @@ class TestRequestId:
         assert records
         assert {r.request_id for r in records} == {response.headers["X-Request-ID"]}
 
+    @patch("pia.main.dependencytrack.upload_sbom")
+    def test_unhandled_exception_carries_request_id(
+        self,
+        mock_upload,
+        client,
+        valid_request_data,
+        authenticate_as_workload,
+        caplog,
+    ):
+        """The 500 and the logged traceback of an unhandled exception share
+        the request ID, so they can be correlated."""
+        mock_dt_response = Mock()
+        mock_dt_response.ok = True
+        mock_dt_response.status_code = 200
+        mock_dt_response.json.return_value = {"unexpected": "shape"}
+        mock_dt_response.text = '{"unexpected": "shape"}'
+        mock_upload.return_value = mock_dt_response
+
+        response = client.post("/v1/upload/sbom", json=valid_request_data)
+
+        assert response.status_code == 500
+        rid = response.headers["X-Request-ID"]
+        tracebacks = [r for r in caplog.records if r.exc_info]
+        assert tracebacks
+        assert {r.request_id for r in tracebacks} == {rid}
+
     def test_log_records_outside_request_get_placeholder(self, caplog):
         from pia.main import logger
 
@@ -727,8 +751,8 @@ class TestHTTPMetrics:
         labels = dict(method="POST", path="/v1/upload/sbom", status="500")
         before = metric_value("pia_http_requests_total", **labels)
 
-        with pytest.raises(KeyError):
-            client.post("/v1/upload/sbom", json=valid_request_data)
+        response = client.post("/v1/upload/sbom", json=valid_request_data)
+        assert response.status_code == 500
 
         assert metric_value("pia_http_requests_total", **labels) == before + 1
 
