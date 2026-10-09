@@ -388,7 +388,7 @@ async def upload_sbom(
                 dt_payload,
             )
     except dependencytrack.DependencyTrackError as e:
-        logger.error(f"DependencyTrack upload failed: {e!a}")
+        logger.error(f"DependencyTrack upload failed: {e!a}")  # NOSONAR
         _record_upload(workload, dt_project.name, "dt_request_error")
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
