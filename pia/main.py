@@ -246,7 +246,8 @@ def _record_upload(
 # I/O (DB queries, OIDC discovery and JWKS fetches, DependencyTrack upload), so
 # FastAPI must run them in its threadpool. As `async def` they would run on the
 # event loop and a single slow issuer would stall every request, including
-# /livez.
+# /livez. See "Future Work" in docs/DESIGN.md for the
+# preferred async refactor.
 def authenticate(
     authorization: Annotated[str, Header()],
     session: Annotated[Session, Depends(get_session)],

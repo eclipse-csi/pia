@@ -158,8 +158,9 @@ sequenceDiagram
         registered in the workload database.
 3. Token Key Discovery
    1. Fetch OIDC configuration from `{issuer}/.well-known/openid-configuration`
+      (max. 1 MiB, 10s per-read timeout)
    2. Extract `jwks_uri` from configuration
-   3. Fetch public keys from `jwks_uri`
+   3. Fetch public keys from `jwks_uri` (max. 1 MiB, 10s per-read timeout)
    4. Match key using `kid` claim from token header
 4. Token Validation and Signature Verification
    1. Verify generally required claims are present
@@ -504,7 +505,8 @@ DependencyTrack targets.
 | Issuer spoofing | HTTPS-only issuer URLs, strict URL validation |
 | Token forgery | Cryptographic signature verification |
 | Project impersonation | Claim-to-workload validation, project-scoped DependencyTrack project resolution |
-| DoS via OIDC discovery | Cache OIDC discovery, rate limit requests (both future work) |
+| DoS via OIDC discovery | Cap size of issuer responses, per-read timeout; bound total time, cache OIDC discovery, rate limit requests (all future work) |
+| Slow retrieval by a registered issuer (holding threadpool workers by trickling responses) | Not prevented, accepted risk: availability only, and requires control of a registered issuer (see Future Work) |
 | Parsing vulnerabilities | Use minimal schema for unauthenticated POST data, use well-tested JWT library for token parsing |
 
 ### 6.3 Secrets Management
@@ -652,11 +654,23 @@ PIA_EXPECTED_AUDIENCE=pia.eclipse.org  # optional, has default
 
 ## 10. Future Work
 
-- Add caching for oidc config and jwks. `verify_token` builds a fresh
-  `PyJWKClient` per request, so PyJWT's own key cache never survives a request;
-  `pia_oidc_fetch_duration_seconds{phase}` gives the per-phase before/after
-  baseline.
-- Make upload API async, if sync takes too long
+- Add caching for oidc config and jwks. `verify_token` fetches both on every
+  request; `pia_oidc_fetch_duration_seconds{phase}` gives the per-phase
+  before/after baseline.
+- Refactor authentication and upload to async I/O with deadlines (e.g.
+  `httpx.AsyncClient` under `asyncio.timeout`), instead of blocking I/O in the
+  threadpool. PIA currently does not prevent slow retrieval attacks: the 10s
+  timeout on OIDC discovery and JWKS requests applies per socket read, and the
+  deadline is only checked between reads of body data. Reads of response
+  headers, chunked framing (chunk-size lines, extensions, trailers) and the TLS
+  handshake are bounded only per read, so an issuer can hold a worker
+  indefinitely by trickling them. Only a registered issuer can exploit this,
+  since PIA only fetches from known issuers. An outer deadline that cancels the
+  whole request would close this gap.
+- If uploads take too long, don't make clients wait for them: accept the SBOM
+  and immediately return a token, which clients can use to poll the upload
+  status, like DependencyTrack's own BOM upload API does. This is about the API
+  contract with clients, independent of whether PIA does async I/O internally.
 - Protect against replayed tokens (PyPI uses "jti" claim to track used tokens)
 - Consider product-level authentication
 
