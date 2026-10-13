@@ -77,8 +77,15 @@ def _fetch_json(url: str) -> Any:
     or stalled body).
     """
     deadline = time.monotonic() + TIMEOUT
-    with requests.get(url, timeout=TIMEOUT, stream=True) as response:
-        response.raise_for_status()
+    # Don't follow redirects, which could point anywhere (CWE-918)
+    with requests.get(
+        url, timeout=TIMEOUT, stream=True, allow_redirects=False
+    ) as response:
+        # NOTE: raise_for_status() does not raise on 3xx
+        if response.status_code != 200:
+            raise TokenVerificationError(
+                f"Failed to fetch {url}: HTTP {response.status_code}"
+            )
         body = bytearray()
         while chunk := response.raw.read1(8192, decode_content=True):
             body += chunk
