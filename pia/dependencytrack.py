@@ -36,14 +36,14 @@ def upload_sbom(
     }
 
     try:
-        logger.info(f"Uploading SBOM to DependencyTrack at {url}")
+        logger.debug(f"Uploading SBOM to DependencyTrack at {url}")
         response = requests.put(
             url,
             json=payload.to_dict(),
             headers=headers,
             timeout=TIMEOUT,
         )
-        logger.info(f"DependencyTrack responded with status {response.status_code}")
+        logger.debug(f"DependencyTrack responded with status {response.status_code}")
         return response
 
     except requests.RequestException as e:

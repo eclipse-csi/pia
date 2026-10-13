@@ -3,15 +3,17 @@
 import asyncio
 import logging
 import time
+import uuid
 from collections.abc import Awaitable, Callable
 from contextlib import asynccontextmanager
+from contextvars import ContextVar
 from typing import Annotated, NoReturn
 
 import jwt
 from fastapi import Depends, FastAPI, Header, HTTPException, Request, Response, status
 from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, PlainTextResponse
 from prometheus_client import CONTENT_TYPE_PLAIN_0_0_4, generate_latest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
@@ -31,10 +33,29 @@ from .models import (
     verify_workload_claims,
 )
 
+request_id: ContextVar[str] = ContextVar("request_id", default="-")
+"""ID of the HTTP request being handled, set by `assign_request_id`."""
+
+_default_record_factory = logging.getLogRecordFactory()
+
+
+def _record_factory(*args, **kwargs) -> logging.LogRecord:
+    """Stamp every log record with the current request ID.
+
+    A record factory (rather than a handler filter) makes the attribute
+    available to any handler, including pytest's caplog. Outside a request,
+    e.g. at startup, the ID is "-".
+    """
+    record = _default_record_factory(*args, **kwargs)
+    record.request_id = request_id.get()
+    return record
+
+
 # Configure logging
+logging.setLogRecordFactory(_record_factory)
 logging.basicConfig(
     level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    format="%(asctime)s - %(name)s - %(levelname)s - %(request_id)s - %(message)s",
 )
 logger = logging.getLogger(__name__)
 
@@ -96,7 +117,7 @@ async def record_http_metrics(
 ) -> Response:
     """Count and time every HTTP request, labeled by matched route template."""
     # Default to 500: an unhandled endpoint exception is turned into a 500 by
-    # ServerErrorMiddleware, which wraps *outside* this middleware, so here is
+    # `assign_request_id`, which wraps *outside* this middleware, so here is
     # the only place that outcome can be recorded. Binding it before the `try`
     # (rather than in an `except`) also covers any BaseException that is not
     # caught below.
@@ -127,6 +148,38 @@ async def record_http_metrics(
         metrics.HTTP_REQUEST_DURATION.labels(method=method, path=path).observe(duration)
 
 
+# Registered after `record_http_metrics`, so it wraps it and its ID covers all
+# logs of the request. NOTE: uvicorn's access log does not carry the ID.
+@app.middleware("http")
+async def assign_request_id(
+    request: Request,
+    call_next: Callable[[Request], Awaitable[Response]],
+) -> Response:
+    """Assign a request ID for log correlation and return it as X-Request-ID.
+
+    The ID is always generated here, never taken from an inbound header, which
+    would let callers spoof IDs or inject into logs.
+    """
+    rid = uuid.uuid4().hex[:16]
+    token = request_id.set(rid)
+    try:
+        try:
+            response = await call_next(request)
+        except ClientDisconnect:
+            # No one to respond to, and not a server fault; see
+            # record_http_metrics.
+            raise
+        except Exception:
+            # Handled here rather than by ServerErrorMiddleware (outside this
+            # one), so that the traceback and the 500 both carry the ID.
+            logger.exception("Unhandled exception")
+            response = PlainTextResponse("Internal Server Error", status_code=500)
+        response.headers["X-Request-ID"] = rid
+        return response
+    finally:
+        request_id.reset(token)
+
+
 def get_session(request: Request):
     """FastAPI dependency yielding a database session.
 
@@ -150,6 +203,30 @@ def _401(msg: str, reason: RejectionReason) -> NoReturn:
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail=msg,
     )
+
+
+LOGGED_CLAIMS = (
+    "iss",
+    "sub",
+    "repository",
+    "repository_owner_id",
+    "workflow_ref",
+    "event_name",
+    "ref",
+)
+"""Claims identifying a workload, logged when no registered workload matches.
+
+An allowlist keeps personal data (e.g. GitHub `actor`) and noise out of logs.
+"""
+
+
+def _claims_summary(claims: dict) -> str:
+    """Format the LOGGED_CLAIMS present in `claims`, escaped for logging.
+
+    Claim values are signed by the issuer, but chosen in part by whoever
+    triggers the workload (e.g. a branch name in `ref`), so they are escaped.
+    """
+    return ", ".join(f"{k}={claims[k]!a}" for k in LOGGED_CLAIMS if k in claims)
 
 
 def _record_upload(
@@ -181,8 +258,6 @@ async def authenticate(
         _401("Invalid Authorization header format", "invalid_header")
     token = authorization[7:]  # Remove "Bearer " prefix
 
-    logger.info("Bearer token extracted from Authorization header")
-
     # Extract issuer from unverified token
     try:
         unverified_claims = jwt.decode(
@@ -191,10 +266,8 @@ async def authenticate(
         )
         unverified_issuer: str = unverified_claims["iss"]
     except jwt.PyJWTError as e:
-        logger.warning(f"Token decode failed: {e}")
+        logger.warning(f"Token decode failed: {e!a}")
         _401("Invalid token", "invalid_token")
-
-    logger.info(f"Unverified issuer extracted: {unverified_issuer!a}")
 
     # Pre-verification check. The issuer URL from the unverified token is used
     # for OIDC discovery and JWKs requests. It MUST NOT be chosen freely by an
@@ -206,9 +279,7 @@ async def authenticate(
         logger.warning(f"Issuer {unverified_issuer!a} not allowed")
         _401("Issuer not allowed", "issuer_not_allowed")
 
-    logger.info(
-        f"Issuer '{unverified_issuer!a}' is allowed, proceeding with token verification"
-    )
+    logger.info(f"Issuer {unverified_issuer!a} allowed")
     # Full token verification
     try:
         verified_claims = oidc.verify_token(
@@ -217,7 +288,7 @@ async def authenticate(
             settings.expected_audience,
         )
     except oidc.TokenVerificationError as e:
-        logger.warning(f"Token verification failed: {e}")
+        logger.warning(f"Token verification failed: {e!a}")
         _401("Token verification failed", "verification_failed")
 
     logger.info("Token signature verified successfully")
@@ -226,14 +297,23 @@ async def authenticate(
     workload = find_workload_by_claims(session, verified_claims)
     if not workload:
         logger.warning(
-            f"No matching workload found for token claims: {verified_claims}"
+            f"No matching workload found for token claims: "
+            f"{_claims_summary(verified_claims)}"
         )
         _401("No matching workload found for token claims", "no_workload")
+
+    logger.info(
+        f"Matched workload (project={workload.ef_project_id}, "
+        f"type={workload.type}, id={workload.id})"
+    )
 
     # Workload-type-specific claim verification (e.g. GitHub event_name allowlist)
     reason = verify_workload_claims(workload, verified_claims)
     if reason:
-        logger.warning(f"Token claims rejected: {reason}")
+        logger.warning(
+            f"Token claims rejected for workload (project={workload.ef_project_id}, "
+            f"id={workload.id}): {reason!a}"
+        )
         # Include reason in response: at this point the caller is a registered
         # workload holding a verified token, and it needs to know which claim
         # was rejected to fix its workflow (or submit an issue).
@@ -242,11 +322,6 @@ async def authenticate(
             f"accepted, file an issue at {ISSUE_TRACKER_URL}",
             "claims_rejected",
         )
-
-    logger.info(
-        f"Authenticated workload (project={workload.ef_project_id}, "
-        f"type={workload.type}, id={workload.id})"
-    )
 
     return workload
 
@@ -282,7 +357,7 @@ async def upload_sbom(
     dt_project = find_dt_project(session, workload.ef_project_id, payload.product_name)
     if not dt_project:
         logger.warning(
-            f"No DependencyTrack project '{payload.product_name}' found for "
+            f"No DependencyTrack project {payload.product_name!a} found for "
             f"ef_project_id '{workload.ef_project_id}'"
         )
         # The requested product_name is caller-controlled and unvalidated at
@@ -290,15 +365,18 @@ async def upload_sbom(
         _record_upload(workload, metrics.UNREGISTERED_PRODUCT, "no_dt_project")
         _401("No matching DependencyTrack project found", "no_dt_project")
 
-    logger.info(
-        f"Resolved DependencyTrack project '{dt_project.name}' "
-        f"(parent_uuid={dt_project.parent_uuid})"
-    )
-
     # payload.bom is base64; derive the decoded size arithmetically rather than
     # decoding a multi-MB string just to measure it. Observed before the upload
     # so the size is recorded even when DependencyTrack rejects it.
-    metrics.SBOM_SIZE.observe(len(payload.bom) * 3 // 4)
+    sbom_size = len(payload.bom) * 3 // 4
+    metrics.SBOM_SIZE.observe(sbom_size)
+
+    logger.info(
+        f"Resolved DependencyTrack project '{dt_project.name}' "
+        f"(parent_uuid={dt_project.parent_uuid}), uploading "
+        f"version={payload.product_version!a}, is_latest={payload.is_latest}, "
+        f"size={sbom_size}"
+    )
 
     # Build DependencyTrack payload
     dt_payload = DependencyTrackUploadPayload(
@@ -318,7 +396,7 @@ async def upload_sbom(
                 dt_payload,
             )
     except dependencytrack.DependencyTrackError as e:
-        logger.error(f"DependencyTrack upload failed: {e}")
+        logger.error(f"DependencyTrack upload failed: {e!a}")  # NOSONAR
         _record_upload(workload, dt_project.name, "dt_request_error")
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
@@ -328,6 +406,11 @@ async def upload_sbom(
     # Relay DT failures verbatim; on success, return the polling URL the
     # publisher should query for processing status.
     if not dt_response.ok:
+        # The body may echo caller-supplied SBOM content; escape and truncate.
+        logger.warning(
+            f"DependencyTrack rejected upload "
+            f"(status={dt_response.status_code}, body={dt_response.content[:500]!a})"
+        )
         _record_upload(workload, dt_project.name, "dt_http_error")
         return Response(
             content=dt_response.content,
@@ -344,12 +427,16 @@ async def upload_sbom(
         # is NOT safe (it would duplicate the SBOM in DT).
         logger.error(
             f"DependencyTrack returned unparseable success response "
-            f"(status={dt_response.status_code}, body={dt_response.text!r})"
+            f"(status={dt_response.status_code}, body={dt_response.text!a})"
         )
         _record_upload(workload, dt_project.name, "dt_bad_response")
         raise
 
     _record_upload(workload, dt_project.name, "success")
+    logger.info(
+        f"SBOM uploaded (project='{dt_project.name}', "
+        f"version={payload.product_version!a}, dt_token={token!a})"
+    )
 
     dt_url = str(settings.dependency_track_url).rstrip("/")
     return PiaUploadResponse(
