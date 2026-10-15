@@ -7,6 +7,7 @@ from typing import Any
 
 import jwt
 import requests
+import urllib3
 
 from .metrics import OIDC_FETCH_DURATION, TOKEN_VERIFICATION_DURATION
 
@@ -45,7 +46,10 @@ def _fetch_json(url: str) -> Any:
     only per read, so an issuer can trickle them to hold a worker indefinitely
     (see "Future Work" in docs/DESIGN.md).
 
-    Raises TokenVerificationError, requests.RequestException or ValueError.
+    Raises TokenVerificationError, requests.RequestException, ValueError or
+    urllib3.exceptions.HTTPError (read1() bypasses requests' wrapping of
+    urllib3 errors raised while reading the body, e.g. a truncated, undecodable
+    or stalled body).
     """
     deadline = time.monotonic() + TIMEOUT
     with requests.get(url, timeout=TIMEOUT, stream=True) as response:
@@ -83,7 +87,11 @@ def verify_token(
             oidc_config = _fetch_json(config_url)
         logger.debug("OIDC configuration fetched successfully")
 
-    except (requests.RequestException, ValueError) as e:
+    except (
+        requests.RequestException,
+        urllib3.exceptions.HTTPError,
+        ValueError,
+    ) as e:
         raise TokenVerificationError(
             f"Failed to fetch OIDC configuration from {config_url}: {e}"
         ) from e

@@ -8,6 +8,7 @@ from unittest.mock import MagicMock, call, patch
 import jwt
 import pytest
 import requests
+import urllib3
 from cryptography.hazmat.primitives.asymmetric import rsa
 
 from pia.oidc import MAX_RESPONSE_SIZE, TokenVerificationError, verify_token
@@ -89,6 +90,30 @@ class TestVerifyToken:
             TokenVerificationError, match="Failed to fetch OIDC configuration"
         ):
             verify_token("token", "issuer", "audience")
+
+    @pytest.mark.parametrize(
+        "error",
+        [
+            urllib3.exceptions.ProtocolError("Connection broken"),
+            urllib3.exceptions.DecodeError("failed to decode"),
+            urllib3.exceptions.ReadTimeoutError(None, CONFIG_URL, "Read timed out"),
+        ],
+    )
+    @patch("pia.oidc.requests.get")
+    def test_verify_token_oidc_config_body_read_error(self, mock_get, error):
+        """Test error when reading the OIDC config body fails.
+
+        read1() raises raw urllib3 errors (truncated, undecodable or stalled
+        body), which requests does not wrap in RequestException.
+        """
+        response = fake_response()
+        response.raw.read1.side_effect = error
+        mock_get.return_value = response
+
+        with pytest.raises(
+            TokenVerificationError, match="Failed to fetch OIDC configuration"
+        ):
+            verify_token("token", ISSUER, AUDIENCE)
 
     @patch("pia.oidc.requests.get")
     def test_verify_token_oidc_config_http_error(self, mock_get):
