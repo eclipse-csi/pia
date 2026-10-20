@@ -96,7 +96,9 @@ class TestVerifyToken:
         [
             urllib3.exceptions.ProtocolError("Connection broken"),
             urllib3.exceptions.DecodeError("failed to decode"),
-            urllib3.exceptions.ReadTimeoutError(None, CONFIG_URL, "Read timed out"),
+            urllib3.exceptions.ReadTimeoutError(
+                MagicMock(), CONFIG_URL, "Read timed out"
+            ),
         ],
     )
     @patch("pia.oidc.requests.get")
