@@ -43,12 +43,10 @@ def make_token(private_key, kid=KID):
     )
 
 
-def fake_response(body=b"", chunks=None, status_error=None):
+def fake_response(body=b"", chunks=None, status_code=200):
     """Return a mock streamed requests response yielding body or chunks."""
-    response = MagicMock()
+    response = MagicMock(status_code=status_code)
     response.__enter__.return_value = response
-    if status_error:
-        response.raise_for_status.side_effect = status_error
     response.raw.read1.side_effect = list(chunks or [body]) + [b""]
     return response
 
@@ -76,8 +74,8 @@ class TestVerifyToken:
 
         # Assert streamed requests, read in bounded, decoded chunks
         assert mock_get.call_args_list == [
-            call(CONFIG_URL, timeout=10, stream=True),
-            call(JWKS_URI, timeout=10, stream=True),
+            call(CONFIG_URL, timeout=10, stream=True, allow_redirects=False),
+            call(JWKS_URI, timeout=10, stream=True, allow_redirects=False),
         ]
         for response in responses:
             response.raw.read1.assert_called_with(8192, decode_content=True)
@@ -117,14 +115,32 @@ class TestVerifyToken:
         ):
             verify_token("token", ISSUER, AUDIENCE)
 
+    @pytest.mark.parametrize("status_code", [301, 302, 303, 307, 308, 404, 500])
     @patch("pia.oidc.requests.get")
-    def test_verify_token_oidc_config_http_error(self, mock_get):
-        """Test error when OIDC config response is an HTTP error."""
-        mock_get.return_value = fake_response(status_error=requests.HTTPError("404"))
+    def test_verify_token_oidc_config_not_ok(self, mock_get, status_code):
+        """Test error, without JWKS fetch, if OIDC config response is not 200."""
+        mock_get.return_value = fake_response(status_code=status_code)
+
         with pytest.raises(
-            TokenVerificationError, match="Failed to fetch OIDC configuration"
+            TokenVerificationError, match=f"Failed to fetch .* HTTP {status_code}"
         ):
             verify_token("token", ISSUER, AUDIENCE)
+
+        mock_get.assert_called_once()
+
+    @pytest.mark.parametrize("status_code", [301, 302, 303, 307, 308, 404, 500])
+    @patch("pia.oidc.requests.get")
+    def test_verify_token_jwks_not_ok(self, mock_get, private_key, status_code):
+        """Test error if JWKS response is not 200."""
+        mock_get.side_effect = [
+            json_response({"jwks_uri": JWKS_URI}),
+            fake_response(status_code=status_code),
+        ]
+
+        with pytest.raises(
+            TokenVerificationError, match=f"Failed to fetch .* HTTP {status_code}"
+        ):
+            verify_token(make_token(private_key), ISSUER, AUDIENCE)
 
     @patch("pia.oidc.requests.get")
     def test_verify_token_oidc_config_invalid_json(self, mock_get):
@@ -188,6 +204,72 @@ class TestVerifyToken:
 
         claims = verify_token(make_token(private_key), ISSUER, AUDIENCE)
         assert claims["iss"] == ISSUER
+
+    @pytest.mark.parametrize(
+        "jwks_uri",
+        [
+            "https://evil.example/jwks",
+            "https://ci.eclipse.org.evil.example/proj/oidc/jwks",
+            "http://ci.eclipse.org/proj/oidc/jwks",
+            "https://ci.eclipse.org:9001/proj/oidc/jwks",
+            "https://ci.eclipse.org@evil.example/proj/oidc/jwks",
+            "https://ci.eclipse.org/proj/oidc@evil.example/jwks",
+            "https://ci.eclipse.org/proj/oidc/\\@evil.example/",
+            "https://evil.example\\@ci.eclipse.org/proj/oidc/jwks",
+            "https://ci.eclipse.org/proj/oidcX/jwks",
+            "https://ci.eclipse.org/proj/oidc",
+            "https://ci.eclipse.org/proj/oidc/",
+            "https://ci.eclipse.org/other/oidc/jwks",
+            "https://ci.eclipse.org/proj/oidc/../../other/oidc/jwks",
+            "https://ci.eclipse.org/proj/oidc/./jwks",
+            "https://ci.eclipse.org/proj/oidc/%2e%2e/jwks",
+            "https://ci.eclipse.org/proj/oidc/jwks?x=https://evil.example",
+            "https://ci.eclipse.org/proj/oidc/jwks#frag",
+            "https://ci.eclipse.org/proj/oidc/jwks\n",
+            "https://ci.eclipse.org/proj/oidc/ jwks",
+            "file:///etc/passwd",
+            123,
+            ["https://ci.eclipse.org/proj/oidc/jwks"],
+        ],
+    )
+    @patch("pia.oidc.requests.get")
+    def test_verify_token_jwks_uri_not_under_issuer(self, mock_get, jwks_uri):
+        """Test error, without JWKS fetch, if jwks_uri is not under issuer."""
+        mock_get.return_value = json_response({"jwks_uri": jwks_uri})
+
+        with pytest.raises(TokenVerificationError, match="is not under issuer"):
+            verify_token("token", "https://ci.eclipse.org/proj/oidc", AUDIENCE)
+
+        mock_get.assert_called_once()
+
+    @pytest.mark.parametrize(
+        "issuer, jwks_uri",
+        [
+            (
+                "https://token.actions.githubusercontent.com",
+                "https://token.actions.githubusercontent.com/.well-known/jwks",
+            ),
+            (
+                "https://ci.eclipse.org/proj/oidc",
+                "https://ci.eclipse.org/proj/oidc/jwks",
+            ),
+        ],
+    )
+    @patch("pia.oidc.requests.get")
+    def test_verify_token_jwks_uri_allowed(
+        self, mock_get, private_key, issuer, jwks_uri
+    ):
+        """Test real-world GitHub and Jenkins jwks_uri shapes are accepted."""
+        mock_get.side_effect = [
+            json_response({"jwks_uri": jwks_uri}),
+            json_response({"keys": [make_jwk(private_key)]}),
+        ]
+
+        verify_token(make_token(private_key), issuer, AUDIENCE)
+
+        assert mock_get.call_args_list[1] == call(
+            jwks_uri, timeout=10, stream=True, allow_redirects=False
+        )
 
 
 class TestFetchBounds:

@@ -2,6 +2,7 @@
 
 import json
 import logging
+import re
 import time
 from typing import Any
 
@@ -32,6 +33,30 @@ class TokenVerificationError(Exception):
     """Raised when token verification fails."""
 
 
+_JWKS_PATH_PATTERN = re.compile(r"[A-Za-z0-9._~/-]+")
+
+
+def _is_jwks_uri_allowed(jwks_uri: Any, issuer: str) -> bool:
+    """Check that jwks_uri is a path under the (already allowlisted) issuer URL.
+
+    Deliberately uses string matching instead of a URL parser: urlparse and the
+    libraries that perform the fetch (requests/urllib3, urllib.request) disagree
+    on some inputs (e.g. backslashes). Requiring the trusted issuer string plus
+    "/" as prefix pins scheme, host, port and userinfo.
+    The remaining path is restricted to unreserved characters without "." or ".."
+    segments.
+    """
+    prefix = issuer + "/"
+    if not isinstance(jwks_uri, str) or not jwks_uri.startswith(prefix):
+        return False
+
+    path = jwks_uri[len(prefix) :]
+    if not _JWKS_PATH_PATTERN.fullmatch(path):
+        return False
+
+    return not any(segment in (".", "..") for segment in path.split("/"))
+
+
 def _fetch_json(url: str) -> Any:
     """Fetch and parse a JSON document from an issuer, with a size cap.
 
@@ -52,8 +77,15 @@ def _fetch_json(url: str) -> Any:
     or stalled body).
     """
     deadline = time.monotonic() + TIMEOUT
-    with requests.get(url, timeout=TIMEOUT, stream=True) as response:
-        response.raise_for_status()
+    # Don't follow redirects, which could point anywhere (CWE-918)
+    with requests.get(
+        url, timeout=TIMEOUT, stream=True, allow_redirects=False
+    ) as response:
+        # NOTE: raise_for_status() does not raise on 3xx
+        if response.status_code != 200:
+            raise TokenVerificationError(
+                f"Failed to fetch {url}: HTTP {response.status_code}"
+            )
         body = bytearray()
         while chunk := response.raw.read1(8192, decode_content=True):
             body += chunk
@@ -104,7 +136,12 @@ def verify_token(
     if not jwks_uri:
         raise TokenVerificationError("OIDC configuration missing 'jwks_uri'")
 
-    logger.debug(f"JWKS URI: {jwks_uri!a}")
+    if not _is_jwks_uri_allowed(jwks_uri, issuer):
+        raise TokenVerificationError(
+            f"jwks_uri {jwks_uri!r} is not under issuer {issuer!r}"
+        )
+
+    logger.info(f"JWKS URI: {jwks_uri!a}")
 
     try:
         # 3. Requests public keys from issuer
