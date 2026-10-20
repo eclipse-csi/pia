@@ -242,7 +242,13 @@ def _record_upload(
     ).inc()
 
 
-async def authenticate(
+# `authenticate` and `upload_sbom` are plain `def` on purpose: they do blocking
+# I/O (DB queries, OIDC discovery and JWKS fetches, DependencyTrack upload), so
+# FastAPI must run them in its threadpool. As `async def` they would run on the
+# event loop and a single slow issuer would stall every request, including
+# /livez. See "Future Work" in docs/DESIGN.md for the
+# preferred async refactor.
+def authenticate(
     authorization: Annotated[str, Header()],
     session: Annotated[Session, Depends(get_session)],
 ) -> Workload:
@@ -347,7 +353,7 @@ async def get_metrics():
 
 
 @app.post("/v1/upload/sbom", status_code=status.HTTP_200_OK)
-async def upload_sbom(
+def upload_sbom(
     payload: PiaUploadPayload,
     workload: Annotated[Workload, Depends(authenticate)],
     session: Annotated[Session, Depends(get_session)],

@@ -11,11 +11,10 @@ logger = logging.getLogger(__name__)
 TIMEOUT = (5, 30)
 """Connect and read timeouts for the DependencyTrack upload request, in seconds.
 
-Without a timeout a hung DependencyTrack blocks the request forever. The
-handlers are `async def` but `requests` is blocking, so that stalls the whole
-event loop, not just the one upload. The read timeout is generous because it
-bounds silence between bytes, not the total upload time, and SBOMs can be
-several MB."""
+Without a timeout a hung DependencyTrack blocks the request forever, and holds
+one of the server's threadpool workers with it. The read timeout is generous
+because it bounds silence between bytes, not the total upload time, and SBOMs
+can be several MB."""
 
 
 class DependencyTrackError(Exception):
