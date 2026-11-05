@@ -1,0 +1,43 @@
+version: 2
+updates:
+  - package-ecosystem: "uv"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    cooldown:
+      default-days: 7
+    open-pull-requests-limit: 10
+    groups:
+      test-and-lint-dependencies:
+        # Dev-only tooling from [dependency-groups].dev; never ships in the image
+        patterns:
+          - "ruff"
+          - "mypy"
+          - "pytest"
+          - "pytest-cov"
+          - "httpx"
+          - "types-*"
+      dependencies:
+        # Runtime dependencies, plus anything not caught by earlier groups
+        patterns:
+          - "*"
+
+  - package-ecosystem: "docker"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    cooldown:
+      default-days: 7
+    open-pull-requests-limit: 10
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    cooldown:
+      default-days: 7
+    open-pull-requests-limit: 10
+    groups:
+      action-dependencies:
+        patterns:
+          - "*"
