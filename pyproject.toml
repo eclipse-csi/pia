@@ -29,12 +29,12 @@ pia = "pia.cli:cli"
 
 [dependency-groups]
 dev = [
-    "pytest>=9.0.3",
-    "ruff>=0.14.9",
+    "pytest>=9.2.0",
+    "ruff>=0.17.3",
     "httpx>=0.28.0",
-    "pytest-cov>=7.0.0",
-    "mypy>=1.19.1",
-    "types-requests>=2.32.0",
+    "pytest-cov>=7.1.0",
+    "mypy>=2.4.1",
+    "types-requests>=2.33.0.20261006",
     "types-PyYAML>=6.0",
 ]
 [tool.ruff]
