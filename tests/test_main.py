@@ -16,11 +16,50 @@ from starlette.requests import ClientDisconnect
 
 from pia import metrics
 from pia.dependencytrack import DependencyTrackError
-from pia.models import GitHubWorkload, Workload
+from pia.models import GitHubWorkload, GitLabWorkload, Workload
 from pia.oidc import TokenVerificationError
 
 GITHUB_ISSUER = "https://token.actions.githubusercontent.com"
+GITLAB_ISSUER = "https://gitlab.eclipse.org"
 BEARER_TOKEN = "Bearer eyJhbGciOiJSUzI1NiJ9.test.token"
+
+
+def _gitlab_claims(**overrides):
+    """Claims of a real Eclipse GitLab ID token, for the seeded GitLab workload."""
+    claims = {
+        "project_id": "16770",
+        "project_path": "eclipse/test/repo",
+        "namespace_id": "1748",
+        "namespace_path": "eclipse/test",
+        "user_id": "21354",
+        "user_login": "octocat",
+        "user_email": "octocat@example.org",
+        "user_access_level": "developer",
+        "job_project_id": "16770",
+        "job_project_path": "eclipse/test/repo",
+        "pipeline_id": "175652",
+        "pipeline_source": "push",
+        "job_id": "2339517",
+        "ref": "main",
+        "ref_type": "branch",
+        "ref_path": "refs/heads/main",
+        "ref_protected": "true",
+        "job_source": "push",
+        "runner_id": 2982,
+        "runner_environment": "self-hosted",
+        "sha": "2184a8f0ad3782ea857b61f415e42cb9f9680701",
+        "project_visibility": "public",
+        "ci_config_ref_uri": (
+            "gitlab.eclipse.org/eclipse/test/repo//.gitlab-ci.yml@refs/heads/main"
+        ),
+        "ci_config_sha": "2184a8f0ad3782ea857b61f415e42cb9f9680701",
+        "jti": "76059480-782f-42c1-a9e3-d29d8383a0a3",
+        "iss": GITLAB_ISSUER,
+        "sub": "project_path:eclipse/test/repo:ref_type:branch:ref:main",
+        "aud": "pia.eclipse.org",
+    }
+    claims.update(overrides)
+    return claims
 
 
 @pytest.fixture
@@ -121,6 +160,58 @@ class TestAuthenticate:
         result = self._call(BEARER_TOKEN, seed_db)
         assert isinstance(result, Workload)
         assert result.ef_project_id == "eclipse-test"
+
+    @patch("pia.main.oidc.verify_token")
+    @patch("pia.main.jwt.decode")
+    def test_gitlab_success(self, mock_decode, mock_verify, seed_db, caplog):
+        """A GitLab push pipeline token authenticates the seeded workload."""
+        mock_decode.return_value = {"iss": GITLAB_ISSUER}
+        mock_verify.return_value = _gitlab_claims()
+        with caplog.at_level(logging.INFO, logger="pia.main"):
+            result = self._call(BEARER_TOKEN, seed_db)
+        assert isinstance(result, GitLabWorkload)
+        assert result.ef_project_id == "eclipse-test"
+        assert "type=gitlab" in caplog.text
+
+    @patch("pia.main.oidc.verify_token")
+    @patch("pia.main.jwt.decode")
+    def test_gitlab_disallowed_pipeline_source(self, mock_decode, mock_verify, seed_db):
+        """GitLab token with disallowed pipeline_source is rejected."""
+        mock_decode.return_value = {"iss": GITLAB_ISSUER}
+        mock_verify.return_value = _gitlab_claims(pipeline_source="trigger")
+        with pytest.raises(HTTPException) as exc:
+            self._call(BEARER_TOKEN, seed_db)
+        assert exc.value.status_code == 401
+        assert "Token claims rejected" in exc.value.detail
+        assert "trigger" in exc.value.detail
+        assert "schedule" in exc.value.detail
+        assert "github.com/eclipse-csi/pia/issues" in exc.value.detail
+
+    @patch("pia.main.oidc.verify_token")
+    @patch("pia.main.jwt.decode")
+    def test_gitlab_fork_merge_request_logs_claims_without_user(
+        self, mock_decode, mock_verify, seed_db, caplog
+    ):
+        """A fork's MR pipeline token matches no workload; the log names the
+        GitLab identity claims but no user data."""
+        mock_decode.return_value = {"iss": GITLAB_ISSUER}
+        mock_verify.return_value = _gitlab_claims(
+            project_path="attacker/repo",
+            project_id="31337",
+            namespace_path="attacker",
+            namespace_id="4242",
+            pipeline_source="merge_request_event",
+        )
+        with (
+            caplog.at_level(logging.INFO, logger="pia.main"),
+            pytest.raises(HTTPException) as exc,
+        ):
+            self._call(BEARER_TOKEN, seed_db)
+        assert "No matching workload found" in exc.value.detail
+        assert "project_path='attacker/repo'" in caplog.text
+        assert "project_id='31337'" in caplog.text
+        assert "pipeline_source='merge_request_event'" in caplog.text
+        assert "octocat" not in caplog.text
 
     @patch("pia.main.oidc.verify_token")
     @patch("pia.main.jwt.decode")
@@ -1001,6 +1092,22 @@ class TestRejectionReasons:
             "repository_owner_id": "42",
             "event_name": "pull_request_target",
         }
+        before = metric_value("pia_upload_rejections_total", reason="claims_rejected")
+        self._reject(seed_db)
+        assert (
+            metric_value("pia_upload_rejections_total", reason="claims_rejected")
+            == before + 1
+        )
+
+    @patch("pia.main.oidc.verify_token")
+    @patch("pia.main.jwt.decode")
+    def test_gitlab_claims_rejected(
+        self, mock_decode, mock_verify, seed_db, metric_value
+    ):
+        mock_decode.return_value = {"iss": GITLAB_ISSUER}
+        mock_verify.return_value = _gitlab_claims(
+            pipeline_source="external_pull_request_event"
+        )
         before = metric_value("pia_upload_rejections_total", reason="claims_rejected")
         self._reject(seed_db)
         assert (

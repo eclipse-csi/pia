@@ -4,8 +4,9 @@ purpose of uploading SBOMs to the Eclipse Foundation DependencyTrack instance.
 
 > [!IMPORTANT]
 > **Authorization is scoped to the Eclipse Foundation project — not to an
-> individual workload or DependencyTrack project.** Workloads (GitHub repos or
-> Jenkins instances) and DependencyTrack projects are both registered *under* an EF
+> individual workload or DependencyTrack project.** Workloads (GitHub repos,
+> GitLab projects or Jenkins instances) and DependencyTrack projects are both
+> registered *under* an EF
 > project. Any workload registered for an EF project may publish an SBOM to **any**
 > DependencyTrack project registered for that **same** EF project; there is no
 > per-workload → per-DependencyTrack-project binding. Which DependencyTrack project

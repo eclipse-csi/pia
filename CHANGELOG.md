@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+* Eclipse GitLab workloads: tokens issued by `https://gitlab.eclipse.org` are
+  matched by `project_path` and `project_id`, with a `pipeline_source`
+  allowlist; `pia sync` accepts GitLab project URLs
+
 ## [0.9.0] - 2026-10-20
 
 ### Added

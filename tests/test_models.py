@@ -8,6 +8,7 @@ from pia.models import (
     DependencyTrackProject,
     DependencyTrackUploadPayload,
     GitHubWorkload,
+    GitLabWorkload,
     JenkinsWorkload,
     PiaUploadPayload,
     find_dt_project,
@@ -17,11 +18,30 @@ from pia.models import (
 )
 
 GITHUB_ISSUER = "https://token.actions.githubusercontent.com"
+GITLAB_ISSUER = "https://gitlab.eclipse.org"
 
 
 class TestIsIssuerKnown:
     def test_github_issuer_known(self, seed_db):
         assert is_issuer_known(seed_db, GITHUB_ISSUER)
+
+    def test_gitlab_issuer_known(self, seed_db):
+        assert is_issuer_known(seed_db, GITLAB_ISSUER)
+
+    @pytest.mark.parametrize(
+        "issuer",
+        [
+            "https://gitlab.eclipse.org/",
+            "https://gitlab.eclipse.org/eclipse/foo",
+            "https://GITLAB.ECLIPSE.ORG",
+            "https://gitlab.eclipse.org@evil.example",
+            "https://gitlab.eclipse.org.evil.example",
+            "http://gitlab.eclipse.org",
+            "https://gitlab.com",
+        ],
+    )
+    def test_gitlab_issuer_near_miss_unknown(self, seed_db, issuer):
+        assert not is_issuer_known(seed_db, issuer)
 
     def test_jenkins_issuer_known(self, seed_db):
         assert is_issuer_known(seed_db, "https://ci.eclipse.org/eclipse-other/oidc")
@@ -127,6 +147,97 @@ class TestFindWorkloadByClaims:
         workload = find_workload_by_claims(seed_db, {"iss": GITHUB_ISSUER})
         assert workload is None
 
+    def test_gitlab_match(self, seed_db):
+        workload = find_workload_by_claims(
+            seed_db,
+            {
+                "iss": GITLAB_ISSUER,
+                "project_path": "eclipse/test/repo",
+                "project_id": "16770",
+            },
+        )
+        assert isinstance(workload, GitLabWorkload)
+        assert workload.ef_project_id == "eclipse-test"
+
+    def test_gitlab_wrong_path(self, seed_db):
+        workload = find_workload_by_claims(
+            seed_db,
+            {
+                "iss": GITLAB_ISSUER,
+                "project_path": "eclipse/test/other-repo",
+                "project_id": "16770",
+            },
+        )
+        assert workload is None
+
+    def test_gitlab_path_case_mismatch(self, seed_db):
+        # The sync CLI stores the canonical path, and the token carries the
+        # canonical path, so matching is deliberately exact.
+        workload = find_workload_by_claims(
+            seed_db,
+            {
+                "iss": GITLAB_ISSUER,
+                "project_path": "Eclipse/Test/Repo",
+                "project_id": "16770",
+            },
+        )
+        assert workload is None
+
+    def test_gitlab_resurrected_project(self, seed_db):
+        # Same path, different project id: the registered project was deleted
+        # (possibly with its whole namespace) and re-created. Rejected until
+        # the curated file is re-synced.
+        workload = find_workload_by_claims(
+            seed_db,
+            {
+                "iss": GITLAB_ISSUER,
+                "project_path": "eclipse/test/repo",
+                "project_id": "99999",
+            },
+        )
+        assert workload is None
+
+    def test_gitlab_fork_merge_request_pipeline(self, seed_db):
+        # A fork's merge request pipeline run in the parent project: the
+        # `job_project_*` and `ci_config_ref_uri` claims name the registered
+        # parent, but `project_path`/`project_id` name the fork. Matching on
+        # the latter is the security property; do NOT "fix" this by matching
+        # `job_project_*`.
+        workload = find_workload_by_claims(
+            seed_db,
+            {
+                "iss": GITLAB_ISSUER,
+                "project_path": "attacker/repo",
+                "project_id": "31337",
+                "namespace_path": "attacker",
+                "job_project_path": "eclipse/test/repo",
+                "job_project_id": "16770",
+                "source_project_path": "attacker/repo",
+                "source_project_id": "31337",
+                "ci_config_ref_uri": (
+                    "gitlab.eclipse.org/eclipse/test/repo//.gitlab-ci.yml"
+                    "@refs/heads/main"
+                ),
+                "pipeline_source": "merge_request_event",
+            },
+        )
+        assert workload is None
+
+    @pytest.mark.parametrize(
+        "claims",
+        [
+            {},
+            {"project_path": "eclipse/test/repo"},
+            {"project_id": "16770"},
+            {"project_path": ["eclipse/test/repo"], "project_id": "16770"},
+            {"project_path": "eclipse/test/repo", "project_id": 16770},
+            {"project_path": None, "project_id": "16770"},
+        ],
+    )
+    def test_gitlab_missing_or_malformed_claims(self, seed_db, claims):
+        workload = find_workload_by_claims(seed_db, {"iss": GITLAB_ISSUER, **claims})
+        assert workload is None
+
     def test_jenkins_match(self, seed_db):
         workload = find_workload_by_claims(
             seed_db,
@@ -151,6 +262,14 @@ class TestVerifyWorkloadClaims:
             repo_owner="eclipse-test",
             repo_name="repo",
             repo_owner_id="42",
+        )
+
+    @pytest.fixture
+    def gitlab_workload(self):
+        return GitLabWorkload(
+            ef_project_id="eclipse-test",
+            project_path="eclipse/test/repo",
+            project_id="16770",
         )
 
     @pytest.fixture
@@ -179,6 +298,41 @@ class TestVerifyWorkloadClaims:
 
     def test_github_missing_event(self, github_workload):
         reason = verify_workload_claims(github_workload, {})
+        assert reason is not None
+        assert "None" in reason
+
+    @pytest.mark.parametrize("pipeline_source", ["push", "web", "schedule"])
+    def test_gitlab_allowed_pipeline_source(self, gitlab_workload, pipeline_source):
+        assert (
+            verify_workload_claims(
+                gitlab_workload, {"pipeline_source": pipeline_source}
+            )
+            is None
+        )
+
+    @pytest.mark.parametrize(
+        "pipeline_source",
+        [
+            "merge_request_event",
+            "external_pull_request_event",
+            "trigger",
+            "api",
+            "pipeline",
+            "parent_pipeline",
+            "chat",
+            "webide",
+        ],
+    )
+    def test_gitlab_disallowed_pipeline_source(self, gitlab_workload, pipeline_source):
+        reason = verify_workload_claims(
+            gitlab_workload, {"pipeline_source": pipeline_source}
+        )
+        assert reason is not None
+        assert pipeline_source in reason
+        assert "push" in reason
+
+    def test_gitlab_missing_pipeline_source(self, gitlab_workload):
+        reason = verify_workload_claims(gitlab_workload, {})
         assert reason is not None
         assert "None" in reason
 

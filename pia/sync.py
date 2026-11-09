@@ -5,14 +5,16 @@ source of truth): it creates new entries, updates changed ones, and deletes entr
 that are no longer in the file.
 
 The file is a list of Eclipse Foundation projects, each with a flat list of workload
-URLs (GitHub repo or Jenkins instance URL — the type is inferred from the host) and a
-single DependencyTrack project with its products. A Jenkins workload is listed as
-its instance URL; PIA appends ``/oidc`` to derive the OIDC issuer:
+URLs (GitHub repo, GitLab project or Jenkins instance URL — the type is inferred
+from the host) and a single DependencyTrack project with its products. A Jenkins
+workload is listed as its instance URL; PIA appends ``/oidc`` to derive the OIDC
+issuer:
 
     projects:
       - id: technology.foo
         workloads:
           - https://github.com/eclipse-foo/repo
+          - https://gitlab.eclipse.org/eclipse/foo/repo
           - https://ci.eclipse.org/foo
         dependency_track:
           project: "Eclipse Foo"
@@ -25,7 +27,7 @@ import logging
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import quote, urlparse
 
 import click
 import requests
@@ -36,11 +38,13 @@ from sqlalchemy.orm import Session
 
 from .models import (
     GITHUB_BASE_URL,
+    GITLAB_ISSUER,
     JENKINS_ISSUER_BASE_URL,
     JENKINS_OIDC_SUFFIX,
     DependencyTrackProject,
     EclipseFoundationProject,
     GitHubWorkload,
+    GitLabWorkload,
     JenkinsWorkload,
 )
 
@@ -96,7 +100,9 @@ def load_projects_file(path: str) -> ProjectsFile:
 def classify_workload_url(url: str) -> tuple[str, str, str]:
     """Classify a workload URL by host.
 
-    Returns ``("github", repo_owner, repo_name)`` for a github.com repo URL or
+    Returns ``("github", repo_owner, repo_name)`` for a github.com repo URL,
+    ``("gitlab", project_path, "")`` for a gitlab.eclipse.org project URL (the
+    path may be nested in subgroups, e.g. ``eclipse/foo/bar``), or
     ``("jenkins", issuer, "")`` for a ci.eclipse.org Jenkins instance URL. In the
     Jenkins case the URL is the *workload* URL (``https://ci.eclipse.org/<name>``)
     and the returned issuer is that URL with ``/oidc`` appended — the file lists
@@ -114,6 +120,17 @@ def classify_workload_url(url: str) -> tuple[str, str, str]:
             )
         return ("github", parts[0], parts[1])
 
+    if base_url == GITLAB_ISSUER:
+        parts = [seg for seg in parsed.path.split("/") if seg]
+        # Reject web UI URLs (`/-/tree/main`, ...) and clone URLs (`.git`): both
+        # fail the API lookup later with an opaque 404.
+        if len(parts) < 2 or "-" in parts or parts[-1].endswith(".git"):
+            raise click.ClickException(
+                f"GitLab URL must be '{GITLAB_ISSUER}/<group>[/<subgroup>...]/"
+                f"<project>': {url}"
+            )
+        return ("gitlab", "/".join(parts), "")
+
     if base_url == JENKINS_ISSUER_BASE_URL:
         parts = [seg for seg in parsed.path.split("/") if seg]
         if len(parts) != 1:
@@ -124,8 +141,8 @@ def classify_workload_url(url: str) -> tuple[str, str, str]:
         return ("jenkins", issuer, "")
 
     raise click.ClickException(
-        f"URL must be a {GITHUB_BASE_URL} repo URL or a "
-        f"{JENKINS_ISSUER_BASE_URL} instance URL: {url}"
+        f"URL must be a {GITHUB_BASE_URL} repo URL, a {GITLAB_ISSUER} project "
+        f"URL or a {JENKINS_ISSUER_BASE_URL} instance URL: {url}"
     )
 
 
@@ -133,7 +150,7 @@ def validate_projects_file(pf: ProjectsFile) -> None:
     """Semantic validation beyond structural parsing (no network access).
 
     Enforces: globally unique Eclipse Foundation project ids; globally unique
-    workload URLs that are valid GitHub/Jenkins URLs; and globally unique
+    workload URLs that are valid GitHub/GitLab/Jenkins URLs; and globally unique
     DependencyTrack names (projects and products alike).
     """
     # Raise on duplicate project IDs
@@ -171,6 +188,13 @@ def validate_projects_file(pf: ProjectsFile) -> None:
 
 JSON_TYPE = "application/json"
 
+TIMEOUT = (5, 30)
+"""Connect and read timeouts for the GitHub, GitLab and DependencyTrack API
+requests, in seconds.
+
+Without a timeout a hung API blocks ``pia sync`` forever. The read timeout
+bounds silence between bytes, not the total request time."""
+
 
 def fetch_github_owner_id(owner: str, token: str | None = None) -> str:
     """Resolve a GitHub owner login to its numeric id.
@@ -183,11 +207,40 @@ def fetch_github_owner_id(owner: str, token: str | None = None) -> str:
     headers = {"Accept": "application/vnd.github+json"}
     if token:
         headers["Authorization"] = f"Bearer {token}"
-    response = requests.get(url, headers=headers)
+    response = requests.get(url, headers=headers, timeout=TIMEOUT)
     response.raise_for_status()
     owner_id = str(response.json()["id"])
     logger.info(f"GitHub owner {owner!a} has id {owner_id!a}")
     return owner_id
+
+
+def fetch_gitlab_project_id(project_path: str) -> str:
+    """Resolve an Eclipse GitLab project path to its numeric id.
+
+    Anonymous access suffices: Eclipse projects are public. GitLab resolves the
+    path case-insensitively, so the response's canonical
+    ``path_with_namespace`` must equal the listed path: the stored path is
+    compared verbatim against the token's ``project_path`` claim at upload.
+    """
+    url = f"{GITLAB_ISSUER}/api/v4/projects/{quote(project_path, safe='')}"
+    logger.info(f"Fetching GitLab project id from {url!a}")
+    response = requests.get(url, headers={"Accept": JSON_TYPE}, timeout=TIMEOUT)
+    if response.status_code == 404:
+        # Anonymous lookups cannot see private or internal projects either.
+        raise click.ClickException(
+            f"GitLab project {project_path!r} not found, or not public: "
+            f"{GITLAB_ISSUER}/{project_path}"
+        )
+    response.raise_for_status()
+    data = response.json()
+    canonical = data["path_with_namespace"]
+    if canonical != project_path:
+        raise click.ClickException(
+            f"GitLab project path {project_path!r} is not canonical, use {canonical!r}"
+        )
+    project_id = str(data["id"])
+    logger.info(f"GitLab project {project_path!a} has id {project_id!a}")
+    return project_id
 
 
 def _dt_search_root_projects(
@@ -200,6 +253,7 @@ def _dt_search_root_projects(
         url,
         params={"name": name, "onlyRoot": "true"},
         headers={"X-Api-Key": api_key, "Accept": JSON_TYPE},
+        timeout=TIMEOUT,
     )
     response.raise_for_status()
     return response.json()
@@ -229,6 +283,7 @@ def _dt_create_project(
             "Accept": JSON_TYPE,
             "Content-Type": JSON_TYPE,
         },
+        timeout=TIMEOUT,
     )
     if response.status_code == 409:
         raise click.ClickException(
@@ -350,6 +405,7 @@ class DB:
 
     ef: dict[tuple[str, ...], EclipseFoundationProject] = field(default_factory=dict)
     github: dict[tuple[str, ...], GitHubWorkload] = field(default_factory=dict)
+    gitlab: dict[tuple[str, ...], GitLabWorkload] = field(default_factory=dict)
     jenkins: dict[tuple[str, ...], JenkinsWorkload] = field(default_factory=dict)
     dt: dict[tuple[str, ...], DependencyTrackProject] = field(default_factory=dict)
 
@@ -362,7 +418,8 @@ def build_desired(
 ) -> DB:
     """Resolve the curated file into a fully-populated desired state.
 
-    Performs the external lookups (GitHub owner ids, DependencyTrack child UUIDs).
+    Performs the external lookups (GitHub owner ids, GitLab project ids,
+    DependencyTrack child UUIDs).
     ``dt_url`` and ``dt_api_key`` are required (the CLI validates their presence).
     DependencyTrack projects are only *resolved* here, never created: a missing one
     raises, directing the operator to run ``pia create-dt-projects`` first.
@@ -388,6 +445,14 @@ def build_desired(
                     repo_owner_id=owner_id_cache[owner],
                 )
                 desired.github[gh.diff_key] = gh
+            elif kind == "gitlab":
+                project_path = a
+                gl = GitLabWorkload(
+                    ef_project_id=project.id,
+                    project_path=project_path,
+                    project_id=fetch_gitlab_project_id(project_path),
+                )
+                desired.gitlab[gl.diff_key] = gl
             else:
                 issuer = a
                 jk = JenkinsWorkload(ef_project_id=project.id, issuer=issuer)
@@ -452,6 +517,9 @@ def _load_current(session: Session) -> DB:
         github={
             w.diff_key: w for w in session.execute(select(GitHubWorkload)).scalars()
         },
+        gitlab={
+            w.diff_key: w for w in session.execute(select(GitLabWorkload)).scalars()
+        },
         jenkins={
             w.diff_key: w for w in session.execute(select(JenkinsWorkload)).scalars()
         },
@@ -486,6 +554,7 @@ def compute_plan(session: Session, desired: DB) -> Plan:
 
     for cur, des in (
         (current.github, desired.github),
+        (current.gitlab, desired.gitlab),
         (current.jenkins, desired.jenkins),
         (current.dt, desired.dt),
     ):

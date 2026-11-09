@@ -208,15 +208,25 @@ def _401(msg: str, reason: RejectionReason) -> NoReturn:
 LOGGED_CLAIMS = (
     "iss",
     "sub",
+    # GitHub
     "repository",
     "repository_owner_id",
     "workflow_ref",
     "event_name",
     "ref",
+    # GitLab
+    "project_path",
+    "project_id",
+    "namespace_path",
+    "namespace_id",
+    "pipeline_source",
+    "ci_config_ref_uri",
+    "ref_protected",
 )
 """Claims identifying a workload, logged when no registered workload matches.
 
-An allowlist keeps personal data (e.g. GitHub `actor`) and noise out of logs.
+An allowlist keeps personal data (e.g. GitHub `actor`, GitLab `user_login` and
+`user_email`) and noise out of logs.
 """
 
 
