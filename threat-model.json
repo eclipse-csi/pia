@@ -1,0 +1,735 @@
+{
+  "spec_version": 1,
+  "repository": "https://github.com/eclipse-csi/pia",
+  "commit": "972572be73e28a8982e089b1d60e11025fe716cc",
+  "date": "2026-11-09",
+  "scope_subpath": null,
+  "description": "PIA is the Eclipse Foundation's OIDC authentication broker for SBOM uploads to DependencyTrack. A CI job (GitHub Actions or a registered Jenkins pipeline) posts an SBOM with a short-lived OIDC token; PIA verifies the token against the allowlisted issuer's JWKS, maps the verified identity to a registered Eclipse Foundation project, and relays the SBOM to that project's DependencyTrack target with PIA's own API key. It runs as one uvicorn worker per pod behind a TLS-terminating, rate-limiting reverse proxy; operators manage registrations with the `pia sync` CLI from a curated YAML file.",
+  "confidence": {
+    "documented": 192,
+    "inferred": 0
+  },
+  "components": [
+    {
+      "name": "auth",
+      "entry_points": [
+        "POST /v1/upload/sbom",
+        "app start"
+      ],
+      "touches": [
+        "env",
+        "network",
+        "global_state"
+      ],
+      "in_scope": true,
+      "provenance": "documented",
+      "source": "DESIGN.md §3.1.1"
+    },
+    {
+      "name": "upload-relay",
+      "entry_points": [
+        "POST /v1/upload/sbom [body]"
+      ],
+      "touches": [
+        "env",
+        "network",
+        "global_state"
+      ],
+      "in_scope": true,
+      "provenance": "documented",
+      "source": "DESIGN.md §3.1 steps 5–6"
+    },
+    {
+      "name": "ops-endpoints",
+      "entry_points": [
+        "any route",
+        "GET /livez",
+        "GET /metrics"
+      ],
+      "touches": [
+        "env",
+        "global_state"
+      ],
+      "in_scope": true,
+      "provenance": "documented",
+      "source": "DESIGN.md §5.4 Label cardinality"
+    },
+    {
+      "name": "operator-tooling",
+      "entry_points": [
+        "pia sync FILE",
+        "pia create-dt-projects FILE",
+        "alembic upgrade head"
+      ],
+      "touches": [
+        "filesystem",
+        "env",
+        "network"
+      ],
+      "in_scope": true,
+      "provenance": "documented",
+      "source": "DESIGN.md §5.5 human-curated file"
+    }
+  ],
+  "out_of_scope": [
+    {
+      "item": "dev-bootstrap-script",
+      "reason": "scripts/dt_bootstrap.py targets the local docker-compose DependencyTrack only, per §1.3",
+      "provenance": "documented",
+      "source": "scripts/dt_bootstrap.py docstring"
+    },
+    {
+      "item": "dev-compose-stack",
+      "reason": "docker-compose.yml and projects.local.yaml are dev-only, per §1.3",
+      "provenance": "documented",
+      "source": "docker-compose.yml Dev-only convenience comment"
+    },
+    {
+      "item": "tests",
+      "reason": "tests/ is not shipped in the image, per §1.3",
+      "provenance": "documented",
+      "source": "Dockerfile COPY lines"
+    }
+  ],
+  "trust_boundaries": [
+    {
+      "component": "auth",
+      "boundary": "the Authorization header and body cross the boundary unauthenticated; nothing is trusted until the signature check passes; the unverified iss only selects an allowlisted issuer origin for the two outbound fetches",
+      "reachability_precondition": "reachable from the Authorization header of an unauthenticated request, or from an allowlisted issuer's HTTP response",
+      "provenance": "documented",
+      "source": "DESIGN.md §3.1.1, §3.1 steps 5–6, §4.3 and §5.5"
+    },
+    {
+      "component": "upload-relay",
+      "boundary": "verified claims select a registered workload and its EF project; product_name selects a target only within that project; the payload reaches DependencyTrack unchanged under PIA's own API key",
+      "reachability_precondition": "reachable from the body of a request whose token verified for a registered workload, or from a DependencyTrack response",
+      "provenance": "documented",
+      "source": "DESIGN.md §3.1.1, §3.1 steps 5–6, §4.3 and §5.5"
+    },
+    {
+      "component": "ops-endpoints",
+      "boundary": "every request, matched or not, is counted; label values are bounded server-side; no input is trusted",
+      "reachability_precondition": "reachable from any HTTP request to the pod, including unmatched routes and unknown methods",
+      "provenance": "documented",
+      "source": "DESIGN.md §3.1.1, §3.1 steps 5–6, §4.3 and §5.5"
+    },
+    {
+      "component": "operator-tooling",
+      "boundary": "the curated file, PIA_* environment and GitHub / DependencyTrack answers are operator-trusted inputs that become the authorization policy in the database",
+      "reachability_precondition": "reachable from the curated file, the PIA_* environment, or a GitHub / DependencyTrack API response; all operator trust",
+      "provenance": "documented",
+      "source": "DESIGN.md §3.1.1, §3.1 steps 5–6, §4.3 and §5.5"
+    }
+  ],
+  "entry_points": [
+    {
+      "entry_point": "POST /v1/upload/sbom",
+      "parameter": "Authorization header (Bearer JWT)",
+      "attacker_controllable": "yes",
+      "caller_must_enforce": "none — P-SIG",
+      "component": "auth",
+      "provenance": "documented",
+      "source": "DESIGN.md §4.1 request headers"
+    },
+    {
+      "entry_point": "POST /v1/upload/sbom",
+      "parameter": "unverified JWT iss claim",
+      "attacker_controllable": "yes",
+      "caller_must_enforce": "none — P-ISSUER-PIN",
+      "component": "auth",
+      "provenance": "documented",
+      "source": "DESIGN.md §3.1.1 step 2"
+    },
+    {
+      "entry_point": "POST /v1/upload/sbom",
+      "parameter": "JWT header kid and alg",
+      "attacker_controllable": "yes",
+      "caller_must_enforce": "none — P-SIG",
+      "component": "auth",
+      "provenance": "documented",
+      "source": "DESIGN.md §3.1.1 step 4 Verify signature using RSA256"
+    },
+    {
+      "entry_point": "POST /v1/upload/sbom",
+      "parameter": "verified claims (aud, exp, iat, repository, repository_owner_id, event_name)",
+      "attacker_controllable": "conditional",
+      "condition": "only a registered issuer can sign them; the triggering actor chooses event_name, ref and similar within what the issuer allows",
+      "caller_must_enforce": "none — P-SIG, P-WORKLOAD-BIND",
+      "component": "auth",
+      "provenance": "documented",
+      "source": "DESIGN.md §3.1.1 steps 5–6"
+    },
+    {
+      "entry_point": "POST /v1/upload/sbom",
+      "parameter": "Content-Type, malformed or non-UTF-8 body",
+      "attacker_controllable": "yes",
+      "caller_must_enforce": "none — P-ERRORS",
+      "component": "auth",
+      "provenance": "documented",
+      "source": "CHANGELOG 0.9.0 #110"
+    },
+    {
+      "entry_point": "POST /v1/upload/sbom",
+      "parameter": "OIDC discovery document (jwks_uri and the rest)",
+      "attacker_controllable": "conditional",
+      "condition": "only the allowlisted issuer's origin can answer",
+      "caller_must_enforce": "none — P-ISSUER-PIN, P-ISSUER-BOUND",
+      "component": "auth",
+      "provenance": "documented",
+      "source": "DESIGN.md §3.1.1 step 3"
+    },
+    {
+      "entry_point": "POST /v1/upload/sbom",
+      "parameter": "JWKS document",
+      "attacker_controllable": "conditional",
+      "condition": "only a path under the issuer URL",
+      "caller_must_enforce": "none — P-ISSUER-BOUND",
+      "component": "auth",
+      "provenance": "documented",
+      "source": "DESIGN.md §3.1.1 step 3"
+    },
+    {
+      "entry_point": "POST /v1/upload/sbom [body]",
+      "parameter": "product_name",
+      "attacker_controllable": "yes",
+      "caller_must_enforce": "none — P-WORKLOAD-BIND",
+      "component": "upload-relay",
+      "provenance": "documented",
+      "source": "README authorization note"
+    },
+    {
+      "entry_point": "POST /v1/upload/sbom [body]",
+      "parameter": "product_version, is_latest",
+      "attacker_controllable": "yes",
+      "caller_must_enforce": "DependencyTrack validates; PIA relays verbatim (D-SBOM-VALIDATION)",
+      "component": "upload-relay",
+      "provenance": "documented",
+      "source": "DESIGN.md §3.1 step 6"
+    },
+    {
+      "entry_point": "POST /v1/upload/sbom [body]",
+      "parameter": "bom (base64 CycloneDX)",
+      "attacker_controllable": "yes",
+      "caller_must_enforce": "reverse proxy caps the request body; DependencyTrack validates content (D-SBOM-VALIDATION)",
+      "component": "upload-relay",
+      "provenance": "documented",
+      "source": "DESIGN.md §3.1 step 3"
+    },
+    {
+      "entry_point": "POST /v1/upload/sbom [body]",
+      "parameter": "DependencyTrack response (status, body, token)",
+      "attacker_controllable": "no",
+      "caller_must_enforce": "none — relayed verbatim to the client (D-DT-RESPONSE)",
+      "component": "upload-relay",
+      "provenance": "documented",
+      "source": "DESIGN.md §4.1 Relay DependencyTrack status code and body verbatim"
+    },
+    {
+      "entry_point": "any route",
+      "parameter": "HTTP method, path, X-Request-ID header",
+      "attacker_controllable": "yes",
+      "caller_must_enforce": "none — P-METRIC-CARD",
+      "component": "ops-endpoints",
+      "provenance": "documented",
+      "source": "DESIGN.md §5.4 Label cardinality; pia/main.py assign_request_id docstring"
+    },
+    {
+      "entry_point": "GET /livez",
+      "parameter": "query and headers (ignored)",
+      "attacker_controllable": "yes",
+      "caller_must_enforce": "none — unused by the handler",
+      "component": "ops-endpoints",
+      "provenance": "documented",
+      "source": "DESIGN.md §4.1"
+    },
+    {
+      "entry_point": "GET /metrics",
+      "parameter": "query and headers (ignored)",
+      "attacker_controllable": "yes",
+      "caller_must_enforce": "none — unused by the handler",
+      "component": "ops-endpoints",
+      "provenance": "documented",
+      "source": "DESIGN.md §4.1"
+    },
+    {
+      "entry_point": "pia sync FILE",
+      "parameter": "curated YAML file",
+      "attacker_controllable": "no",
+      "caller_must_enforce": "keep the curated file correct and canonical; review every sync plan",
+      "component": "operator-tooling",
+      "provenance": "documented",
+      "source": "DESIGN.md §5.5 curated projects file"
+    },
+    {
+      "entry_point": "pia sync FILE",
+      "parameter": "PIA_DATABASE_URL, PIA_DEPENDENCY_TRACK_API_KEY, PIA_GITHUB_TOKEN, --dt-url",
+      "attacker_controllable": "no",
+      "caller_must_enforce": "keep secrets out of logs and shell history",
+      "component": "operator-tooling",
+      "provenance": "documented",
+      "source": "pia/cli.py module docstring"
+    },
+    {
+      "entry_point": "pia sync FILE",
+      "parameter": "GitHub and DependencyTrack API responses",
+      "attacker_controllable": "no",
+      "caller_must_enforce": "none — trusted collaborator output (§1.10)",
+      "component": "operator-tooling",
+      "provenance": "documented",
+      "source": "pia/sync.py build_desired docstring"
+    },
+    {
+      "entry_point": "pia create-dt-projects FILE",
+      "parameter": "curated YAML file",
+      "attacker_controllable": "no",
+      "caller_must_enforce": "keep the curated file correct and canonical; review every sync plan",
+      "component": "operator-tooling",
+      "provenance": "documented",
+      "source": "DESIGN.md §5.5 curated projects file"
+    },
+    {
+      "entry_point": "pia create-dt-projects FILE",
+      "parameter": "PIA_DEPENDENCY_TRACK_API_KEY, --dt-url",
+      "attacker_controllable": "no",
+      "caller_must_enforce": "keep secrets out of logs and shell history",
+      "component": "operator-tooling",
+      "provenance": "documented",
+      "source": "pia/cli.py module docstring"
+    },
+    {
+      "entry_point": "alembic upgrade head",
+      "parameter": "PIA_DATABASE_URL and shipped migration scripts",
+      "attacker_controllable": "no",
+      "caller_must_enforce": "run with migration credentials, before rollout",
+      "component": "operator-tooling",
+      "provenance": "documented",
+      "source": "README Database Migration"
+    },
+    {
+      "entry_point": "app start",
+      "parameter": "PIA_* settings",
+      "attacker_controllable": "no",
+      "caller_must_enforce": "set per §1.6",
+      "component": "auth",
+      "provenance": "documented",
+      "source": "DESIGN.md §4.2"
+    }
+  ],
+  "environment": {
+    "assumes": [
+      "Python >= 3.13.2 on python:3.14-slim as a non-root user, one uvicorn worker per container",
+      "a reverse proxy in front terminating TLS, rate-limiting and capping body size",
+      "blocking auth and upload I/O runs in the FastAPI threadpool, not on the event loop",
+      "a read-only PostgreSQL user for the app; migrations run beforehand with their own credentials",
+      "token exp/iat are checked against the pod clock with no leeway",
+      "outbound HTTPS to allowlisted issuers and the configured DependencyTrack URL; the CLI also calls api.github.com"
+    ],
+    "does_not": [
+      "spawn child processes",
+      "install signal handlers",
+      "write files",
+      "read environment variables other than PIA_* (requests would honour proxy/CA/.netrc settings, and the production image ships none)",
+      "open sockets other than to the issuer, DependencyTrack, api.github.com (CLI) and the database",
+      "mutate process-wide state after import time (logging factory, Settings, Prometheus registry)"
+    ],
+    "provenance": "documented",
+    "source": ""
+  },
+  "build_variants": [
+    {
+      "name": "PIA_EXPECTED_AUDIENCE",
+      "default": "pia.eclipse.org",
+      "effect": "preserves P-SIG",
+      "discouraged": false,
+      "provenance": "documented",
+      "source": "DESIGN.md §4.2 and §7.2 Set audience, to prevent cross-service token replay"
+    },
+    {
+      "name": "PIA_DEPENDENCY_TRACK_URL-http-scheme",
+      "default": "https://sbom.eclipse.org/api/v1/bom",
+      "effect": "voids P-OUTBOUND-TLS",
+      "discouraged": true,
+      "provenance": "documented",
+      "source": "maintainer ruling, 2026-11"
+    },
+    {
+      "name": "PIA_DATABASE_URL-without-sslmode",
+      "default": "none (required)",
+      "effect": "no claimed property changes",
+      "discouraged": false,
+      "provenance": "documented",
+      "source": "maintainer ruling, 2026-11"
+    },
+    {
+      "name": "uvicorn--workers",
+      "default": "1",
+      "effect": "no claimed property changes",
+      "discouraged": true,
+      "provenance": "documented",
+      "source": "DESIGN.md §5.4 Single worker"
+    },
+    {
+      "name": "uvicorn--reload-and-migrations-on-start",
+      "default": "off",
+      "effect": "no claimed property changes",
+      "discouraged": true,
+      "provenance": "documented",
+      "source": "docker-compose.yml comments"
+    },
+    {
+      "name": "pia-sync--allow-db-updates-and-deletions",
+      "default": "off",
+      "effect": "no claimed property changes",
+      "discouraged": false,
+      "provenance": "documented",
+      "source": "pia/cli.py option help Explicit intent is required"
+    }
+  ],
+  "adversaries": {
+    "in_scope": [
+      "unauthenticated-network-client",
+      "non-maintainer-contributor",
+      "registered-workload",
+      "registered-issuer"
+    ],
+    "out_of_scope": [
+      "project-insider",
+      "operator",
+      "dependencytrack-and-postgresql",
+      "network-attacker-on-outbound-paths",
+      "host-pod-or-cluster-attacker"
+    ],
+    "provenance": "documented",
+    "source": "; DESIGN.md §2.2 item 3; DESIGN.md §2.2 managed by Eclipse Foundation; PR #113 description one project's Jenkins instance cannot point PIA at another project's keys; PR #112 description Known limitati"
+  },
+  "properties_provided": [
+    {
+      "property": "P-SIG",
+      "conditions": "RS256 only; key fetched per request from the allowlisted issuer's JWKS, kid match, use sig or absent; aud equals PIA_EXPECTED_AUDIENCE; exp unexpired; iat present",
+      "violation_symptom": "integrity-bypass",
+      "severity_tier": "security",
+      "provenance": "documented",
+      "source": "DESIGN.md §3.1.1 steps 3–4"
+    },
+    {
+      "property": "P-ISSUER-PIN",
+      "conditions": "iss equals the GitHub issuer or a registered Jenkins issuer; jwks_uri under {iss}/ with unreserved characters and no dot segments; no redirects; HTTP 200 only",
+      "violation_symptom": "x-outbound-request-to-unlisted-host",
+      "severity_tier": "security",
+      "provenance": "documented",
+      "source": "DESIGN.md §3.1.1 steps 2–3; CHANGELOG 0.6.0 #84 and 0.9.0 #113"
+    },
+    {
+      "property": "P-ISSUER-BOUND",
+      "conditions": "each discovery and JWKS response: 10 s per read, 1 MiB decoded cap, 10 s deadline checked between reads; total wall time is not bounded (D-SLOW-RETRIEVAL)",
+      "violation_symptom": "unbounded-allocation",
+      "severity_tier": "security",
+      "provenance": "documented",
+      "source": "DESIGN.md §3.1.1 step 3"
+    },
+    {
+      "property": "P-WORKLOAD-BIND",
+      "conditions": "verified claims match exactly one registered workload; GitHub event_name in {push, workflow_dispatch, release, schedule}; product_name resolved only within the workload's ef_project_id; registrations are operator input",
+      "violation_symptom": "integrity-bypass",
+      "severity_tier": "security",
+      "provenance": "documented",
+      "source": "README authorization note; DESIGN.md §3.1.1 steps 5–6 and §4.3"
+    },
+    {
+      "property": "P-NO-STALL",
+      "conditions": "fewer than about 40 concurrent slow requests; DependencyTrack call has 5 s connect and 30 s read timeouts",
+      "violation_symptom": "hang",
+      "severity_tier": "security",
+      "provenance": "documented",
+      "source": "CHANGELOG 0.9.0 #112; PR #112 description"
+    },
+    {
+      "property": "P-LOG-ESCAPE",
+      "conditions": "values logged before the signature check passes (unverified iss, decode and verification errors) are escaped with !a; request ID server-generated; token and API key never logged",
+      "violation_symptom": "x-log-forgery, info-leak",
+      "severity_tier": "security",
+      "provenance": "documented",
+      "source": "CHANGELOG 0.3.0 #60"
+    },
+    {
+      "property": "P-LOG-ESCAPE-AUTHED",
+      "conditions": "values logged after a token verified for a registered workload (claims summary, product_name, product_version, DependencyTrack body) are escaped with !a; the fixed line text names the caller's real ef_project_id",
+      "violation_symptom": "x-log-forgery",
+      "severity_tier": "correctness",
+      "provenance": "documented",
+      "source": "maintainer ruling, 2026-10"
+    },
+    {
+      "property": "P-ERRORS",
+      "conditions": "malformed POST data yields 422 without echoing the body; token problems yield 401; DependencyTrack failure yields 502 or the relayed status; an unhandled 500 on malformed unauthenticated input is a bug, not a vulnerability (maintainer ruling 2026-10)",
+      "violation_symptom": "crash",
+      "severity_tier": "correctness",
+      "provenance": "documented",
+      "source": "DESIGN.md §5.3; CHANGELOG 0.9.0 #109, #110"
+    },
+    {
+      "property": "P-METRIC-CARD",
+      "conditions": "method collapses to a fixed set, path is the route template or <unmatched>, reason/outcome are Literal, product_name labeled only after resolving to a database row",
+      "violation_symptom": "unbounded-allocation",
+      "severity_tier": "security",
+      "provenance": "documented",
+      "source": "DESIGN.md §5.4 Label cardinality"
+    },
+    {
+      "property": "P-OUTBOUND-TLS",
+      "conditions": "issuer URLs are HTTPS by construction; requests verifies certificates by default; DependencyTrack URL is https (an http URL is dev-only, §1.6)",
+      "violation_symptom": "info-leak",
+      "severity_tier": "security",
+      "provenance": "documented",
+      "source": "maintainer ruling, 2026-11"
+    },
+    {
+      "property": "P-SBOM-OPAQUE",
+      "conditions": "bom relayed byte-identical and never decoded",
+      "violation_symptom": "wrong-output",
+      "severity_tier": "correctness",
+      "provenance": "documented",
+      "source": "DESIGN.md §3.1 step 3"
+    },
+    {
+      "property": "P-SYNC-ATOMIC",
+      "conditions": "pia sync prints its plan, refuses deletions/updates without --allow-db-updates-and-deletions, applies in one transaction, commits once; validator rejects duplicate ids, workload URLs and DependencyTrack names",
+      "violation_symptom": "x-partial-authorization-state",
+      "severity_tier": "correctness",
+      "provenance": "documented",
+      "source": "pia/cli.py sync help; DESIGN.md §5.5"
+    }
+  ],
+  "properties_not_provided": [
+    {
+      "property": "D-REPLAY",
+      "reason": "within the token's lifetime; no jti tracking; stated limit, not silence",
+      "false_friend": false,
+      "provenance": "documented",
+      "source": "issue #9; DESIGN.md §10 Protect against replayed tokens"
+    },
+    {
+      "property": "D-SLOW-RETRIEVAL",
+      "reason": "requires control of a registered issuer; availability only; accepted risk; the 10 s TIMEOUT is per read, not a total deadline",
+      "false_friend": true,
+      "provenance": "documented",
+      "source": "DESIGN.md §10 PIA currently does not prevent slow retrieval attacks; PR #112 description accepted risk"
+    },
+    {
+      "property": "D-RATE-LIMIT",
+      "reason": "the reverse proxy owns rate limiting; every unauthenticated request may cost two outbound fetches and a database query",
+      "false_friend": false,
+      "provenance": "documented",
+      "source": "DESIGN.md §8.1 Reverse proxy for TLS termination and rate limiting; §8.3 Rate limiting per project/IP at reverse proxy level"
+    },
+    {
+      "property": "D-SBOM-VALIDATION",
+      "reason": "authenticated workloads; PIA neither parses the SBOM nor bounds the body; DependencyTrack and the proxy do",
+      "false_friend": false,
+      "provenance": "documented",
+      "source": "DESIGN.md §3.1 step 3; issue #111"
+    },
+    {
+      "property": "D-PRODUCT-LEAST-PRIV",
+      "reason": "within one EF project; any registered workload may publish to every product of that EF project",
+      "false_friend": false,
+      "provenance": "documented",
+      "source": "README authorization note; issue #39 decision Option A"
+    },
+    {
+      "property": "D-EVENT-SEMANTICS",
+      "reason": "maintainer-triggered events in a registered repository; only event_name is checked, not ref, workflow file, actor, environment or SHA",
+      "false_friend": false,
+      "provenance": "documented",
+      "source": "DESIGN.md §3.1.1 step 6 lists the one check"
+    },
+    {
+      "property": "D-JENKINS-JOB",
+      "reason": "registered Jenkins instances; any job that can bind the id-token credential; sub is not checked",
+      "false_friend": false,
+      "provenance": "documented",
+      "source": "DESIGN.md §7.2 No additional claims required; §3.1.1 Jenkins: no additional checks"
+    },
+    {
+      "property": "D-ISSUER-TRUST-ROOT",
+      "reason": "the compromised issuer's own workloads only; cross-issuer substitution is covered by P-ISSUER-PIN",
+      "false_friend": false,
+      "provenance": "documented",
+      "source": "DESIGN.md §2.2 items 1–2"
+    },
+    {
+      "property": "D-INBOUND-TLS",
+      "reason": "a deployment that exposes port 8000 without the proxy owns the exposure",
+      "false_friend": false,
+      "provenance": "documented",
+      "source": "DESIGN.md §8.1; Dockerfile CMD"
+    },
+    {
+      "property": "D-METRICS-AUTH",
+      "reason": "the ingress keeps /metrics private; exposes EF project ids, product names, upload counts and version",
+      "false_friend": false,
+      "provenance": "documented",
+      "source": "DESIGN.md §4.1 served on the application port and unauthenticated"
+    },
+    {
+      "property": "D-DT-RESPONSE",
+      "reason": "non-2xx answers from DependencyTrack are relayed verbatim",
+      "false_friend": false,
+      "provenance": "documented",
+      "source": "DESIGN.md §4.1 verbatim"
+    },
+    {
+      "property": "D-EXTERNAL-ATOMICITY",
+      "reason": "a 500 after a 2xx from DependencyTrack means the SBOM was likely stored; create-dt-projects may stop halfway, re-run is idempotent",
+      "false_friend": false,
+      "provenance": "documented",
+      "source": "pia/main.py upload_sbom comment a retry is NOT safe; pia/cli.py create_dt_projects help"
+    },
+    {
+      "property": "D-ATTESTATION",
+      "reason": "DependencyTrack receives the SBOM under PIA's key with no record of which workload sent it; an authenticated upload is not an attested SBOM",
+      "false_friend": true,
+      "provenance": "documented",
+      "source": "DESIGN.md §3.1 step 6 lists every field sent to DependencyTrack"
+    },
+    {
+      "property": "D-LIVEZ-STATIC",
+      "reason": "/livez returns a constant and does not check the database",
+      "false_friend": false,
+      "provenance": "documented",
+      "source": "pia/main.py livez docstring; issue #96"
+    },
+    {
+      "property": "D-ISSUER-ENUMERATION",
+      "reason": "Jenkins issuer URLs only; the 401 reason reveals whether an issuer is registered before any signature check; accepted because the information is not sensitive",
+      "false_friend": false,
+      "provenance": "documented",
+      "source": "maintainer ruling, 2026-07"
+    },
+    {
+      "property": "D-DB-TRANSPORT",
+      "reason": "a deliberate limit confirmed by the maintainers; PIA passes PIA_DATABASE_URL through unchanged; TLS is whatever the URL says",
+      "false_friend": false,
+      "provenance": "documented",
+      "source": "maintainer ruling, 2026-11"
+    },
+    {
+      "property": "D-CLI-BOUNDS",
+      "reason": "absence-based; interactive operator use; GitHub and DependencyTrack calls in pia sync have no timeout; concurrent runs are not serialized",
+      "false_friend": false,
+      "provenance": "documented",
+      "source": "DESIGN.md §5.5 makes no such statement"
+    }
+  ],
+  "attack_classes": [
+    "auth-bypass",
+    "cross-issuer-key-substitution",
+    "cross-project-write",
+    "error-path-crash",
+    "feed-dependencytrack-malformed-content",
+    "log-forgery",
+    "publish-sbom-as-project",
+    "service-stall",
+    "ssrf",
+    "ssrf-pivot",
+    "worker-exhaustion"
+  ],
+  "downstream_responsibilities": [
+    "keep a reverse proxy in front that terminates TLS, rate-limits, and caps the request body",
+    "do not route /metrics publicly",
+    "use an https:// DependencyTrack URL in production",
+    "use a database URL with TLS where the network is not trusted",
+    "scope the DependencyTrack API key to what each caller needs and rotate it",
+    "run migrations as a separate job with migration credentials; give the app a read-only database user",
+    "treat the curated file as the authorization policy: review every plan with --dry-run first, keep repository URLs canonical and each repository under exactly one EF project, re-sync after a DependencyTrack rename",
+    "set PIA_EXPECTED_AUDIENCE to a deployment-unique value and configure every issuer's token request with it",
+    "register a Jenkins instance only if everyone who can define jobs on it may publish for that EF project",
+    "keep the pod environment free of proxy, CA-bundle and .netrc settings you do not intend requests to honour",
+    "run one uvicorn worker per container; scale by pods",
+    "keep workflows on push, workflow_dispatch, release or schedule free of untrusted code",
+    "treat the ID token as a credential for its lifetime; do not print it; expect no replay protection",
+    "poll the returned polling_url; a 200 means accepted, not processed; do not retry a 500 blindly",
+    "DependencyTrack validates the SBOM; PIA forwards whatever the workload sent"
+  ],
+  "known_misuse": [
+    {
+      "pattern": "a workflow_dispatch or push workflow checks out and runs pull-request code, giving it a token PIA accepts",
+      "why_unsafe": "PIA sees a maintainer event and stops there; the token is minted for whatever code the workflow runs",
+      "instead": "keep publishing workflows free of untrusted inputs"
+    },
+    {
+      "pattern": "a deleted or renamed repository's name is re-created under the same owner and inherits the registration",
+      "why_unsafe": "GitHub workloads are matched on owner id plus names, not repository_id, so a re-created repo silently becomes the publisher",
+      "instead": "treat repo deletion or rename as a pia sync event; repository_id matching is planned as hardening"
+    },
+    {
+      "pattern": "two spellings of one repository registered under two EF projects",
+      "why_unsafe": "GitHub names are case-insensitive, so only one row ever matches and the policy no longer says what it means",
+      "instead": "keep URLs canonical"
+    },
+    {
+      "pattern": "exposing port 8000 directly: plain HTTP, no rate limit, no body cap",
+      "why_unsafe": "PIA provides no TLS, rate limiting or body cap of its own",
+      "instead": "deploy behind the reverse proxy per §1.13"
+    },
+    {
+      "pattern": "treating the DependencyTrack API key as per-project; a portfolio-management key in the app pod",
+      "why_unsafe": "DependencyTrack trusts PIA wholesale, so a wide key widens the blast radius of any PIA bug",
+      "instead": "scope the key per caller"
+    },
+    {
+      "pattern": "retrying an upload after a 500 when the SBOM may already be stored",
+      "why_unsafe": "a 500 after a 2xx from DependencyTrack means the SBOM was likely stored; a retry duplicates it",
+      "instead": "poll DependencyTrack for the version before re-sending"
+    },
+    {
+      "pattern": "running uvicorn with --workers so metrics become per-worker and wrong",
+      "why_unsafe": "each worker keeps its own Prometheus registry, so /metrics reports one worker's view",
+      "instead": "scale by pods"
+    }
+  ],
+  "known_non_findings": [
+    {
+      "reported_as": "JWT decoded with verify_signature=False in pia/main.py authenticate",
+      "why_safe": "Against auth, the integrity-bypass symptom is discharged by the claimed property P-SIG: the unverified claims are used only to select the issuer allowlist row; every authorization decision uses the claims returned by the verifying decode.",
+      "cites": "properties_provided[0]",
+      "suppression": "the unverified claims are used only to select the issuer allowlist row; every authorization decision uses the claims returned by the verifying decode"
+    },
+    {
+      "reported_as": "no rate limiting on /v1/upload/sbom; each request triggers outbound fetches",
+      "why_safe": "Against auth, upload-relay, ops-endpoints, the x-volumetric-dos symptom is discharged by the disclaimed property D-RATE-LIMIT: the report shows only request volume, not a per-request bound being exceeded.",
+      "cites": "properties_not_provided[2]",
+      "suppression": "the report shows only request volume, not a per-request bound being exceeded"
+    },
+    {
+      "reported_as": "slow or trickling issuer holds a worker beyond 10 s",
+      "why_safe": "Against auth, the x-worker-exhaustion symptom is discharged by the disclaimed property D-SLOW-RETRIEVAL: the slow party is a registered issuer, and the event loop and /livez keep serving.",
+      "cites": "properties_not_provided[1]",
+      "suppression": "the slow party is a registered issuer, and the event loop and /livez keep serving"
+    },
+    {
+      "reported_as": "request method or path used as a Prometheus label",
+      "why_safe": "Against ops-endpoints, the unbounded-allocation symptom is discharged by the claimed property P-METRIC-CARD: the value passes through method_label, the route template, a Literal, or a database row before labeling.",
+      "cites": "properties_provided[8]",
+      "suppression": "the value passes through method_label, the route template, a Literal, or a database row before labeling"
+    },
+    {
+      "reported_as": "a valid token can be reused within its lifetime",
+      "why_safe": "Against auth, the x-token-replay symptom is discharged by the disclaimed property D-REPLAY: the replayed token is unexpired and the report shows no acceptance past exp.",
+      "cites": "properties_not_provided[0]",
+      "suppression": "the replayed token is unexpired and the report shows no acceptance past exp"
+    }
+  ],
+  "dispositions": [
+    "valid",
+    "valid_hardening",
+    "out_of_model_trusted_input",
+    "out_of_model_adversary",
+    "out_of_model_unsupported_component",
+    "out_of_model_non_default_build",
+    "by_design_disclaimed",
+    "known_non_finding",
+    "model_gap"
+  ],
+  "open_questions": []
+}

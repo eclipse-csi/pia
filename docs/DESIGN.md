@@ -491,38 +491,12 @@ DependencyTrack targets.
 
 ## 6. Security Considerations
 
-### 6.1 Token Validation
-
-- **Issuer and Project**: Only trust allowed issuers and projects
-- **Expiration**: Reject expired tokens
-- **Signature**: Verify signature before trusting claims
-- **Algorithm**: Only accept RS256 (Identity Provider restriction)
-- **Key Rotation**: Refresh OIDC configs and JWKs
-
-### 6.2 Attack Vectors
-
-| Attack | Mitigation |
-|--------|-----------|
-| Token replay | Short-lived tokens (5-10 min), do not re-use token  (future work) |
-| Issuer spoofing | HTTPS-only issuer URLs, strict URL validation |
-| Token forgery | Cryptographic signature verification |
-| Project impersonation | Claim-to-workload validation, project-scoped DependencyTrack project resolution |
-| DoS via OIDC discovery | Cap size of issuer responses, per-read timeout; bound total time, cache OIDC discovery, rate limit requests (all future work) |
-| Slow retrieval by a registered issuer (holding threadpool workers by trickling responses) | Not prevented, accepted risk: availability only, and requires control of a registered issuer (see Future Work) |
-| Parsing vulnerabilities | Use minimal schema for unauthenticated POST data, use well-tested JWT library for token parsing |
-
-### 6.3 Secrets Management
-
-- Store secrets securely in environment variables
-- Never log tokens or credentials
-- Rotate DependencyTrack credentials regularly
-
-### 6.4 HTTPS Requirements
-
-- All communication must use HTTPS:
-  - PIA API endpoint
-  - OIDC discovery URLs
-  - DependencyTrack API endpoint
+PIA's security contract — what it assumes about its environment, callers and
+peers, which properties it guarantees, which it deliberately does not, and what
+operators and publishers own — is maintained in the
+[threat model](../threat-model.md) at the repository root, together with its
+machine-readable companions `threat-model.yaml` and `threat-model.json`.
+Inbound findings are triaged against it (see its §1.1 quick-start and §1.17).
 
 ## 7. Platform-Specific Details
 

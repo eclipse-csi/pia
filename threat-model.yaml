@@ -1,0 +1,658 @@
+# threat-model.yaml — derived index; the prose threat model is canonical.
+schema: threat-model-sidecar/v2
+project: pia
+prose_version: "threat-model.md@sha256:fc66256ade1e3dae494a5be1f79e4eab283aec4d0e28e419c7a1d8d263712387"
+model_status: accepted
+triage_policy: strict
+confidence: {documented: 166, maintainer: 26, inferred: 0, assumption: 0}
+
+generation:
+  model: "Claude Fable 5.1 (claude-fable-5-1)"
+  effort: medium
+  plugins:
+    - threat-model
+    - threat-model-recon
+    - threat-model-surface
+    - threat-model-interview
+    - threat-model-authoring
+    - threat-model-backtest
+    - threat-model-sidecar
+
+components:
+  - name: auth
+    scope: in
+    reachability_precondition: "reachable from the Authorization header of an unauthenticated request, or from an allowlisted issuer's HTTP response"
+    provenance: {kind: documented, source: "DESIGN.md §3.1.1"}
+  - name: upload-relay
+    scope: in
+    reachability_precondition: "reachable from the body of a request whose token verified for a registered workload, or from a DependencyTrack response"
+    provenance: {kind: documented, source: "DESIGN.md §3.1 steps 5–6"}
+  - name: ops-endpoints
+    scope: in
+    reachability_precondition: "reachable from any HTTP request to the pod, including unmatched routes and unknown methods"
+    provenance: {kind: documented, source: "DESIGN.md §5.4 Label cardinality"}
+  - name: operator-tooling
+    scope: in
+    reachability_precondition: "reachable from the curated file, the PIA_* environment, or a GitHub / DependencyTrack API response; all operator trust"
+    provenance: {kind: documented, source: "DESIGN.md §5.5 human-curated file"}
+  - name: dev-bootstrap-script
+    scope: out
+    reason: "scripts/dt_bootstrap.py targets the local docker-compose DependencyTrack only, per §1.3"
+    provenance: {kind: documented, source: "scripts/dt_bootstrap.py docstring"}
+  - name: dev-compose-stack
+    scope: out
+    reason: "docker-compose.yml and projects.local.yaml are dev-only, per §1.3"
+    provenance: {kind: documented, source: "docker-compose.yml Dev-only convenience comment"}
+  - name: tests
+    scope: out
+    reason: "tests/ is not shipped in the image, per §1.3"
+    provenance: {kind: documented, source: "Dockerfile COPY lines"}
+
+host_side_effects:
+  - {effect: child-processes, stance: absent, components: [auth, upload-relay, ops-endpoints, operator-tooling], conditions: "scan of pia/*.py and alembic/env.py at this version", provenance: {kind: maintainer, date: "2026-11"}}
+  - {effect: signal-handlers, stance: absent, components: [auth, upload-relay, ops-endpoints, operator-tooling], conditions: "scan of pia/*.py and alembic/env.py at this version", provenance: {kind: maintainer, date: "2026-11"}}
+  - {effect: filesystem, stance: conditional, components: [operator-tooling], conditions: "only pia sync / create-dt-projects read the curated file; nothing writes files", provenance: {kind: maintainer, date: "2026-11"}}
+  - {effect: environment-reads, stance: conditional, components: [auth, upload-relay, ops-endpoints, operator-tooling], conditions: "PIA's own code reads only PIA_* variables; requests additionally honours proxy, CA-bundle and .netrc settings on PIA's behalf; the production image ships none", provenance: {kind: maintainer, date: "2026-11"}}
+  - {effect: network-sockets, stance: present, components: [auth, upload-relay, operator-tooling], conditions: "HTTPS to the allowlisted issuer, the configured DependencyTrack URL, api.github.com (CLI only), and PostgreSQL", provenance: {kind: maintainer, date: "2026-11"}}
+  - {effect: global-state, stance: present, components: [auth, upload-relay, ops-endpoints], conditions: "import time in pia/main.py: logging record factory and basicConfig, Settings() load, Prometheus default registry", provenance: {kind: maintainer, date: "2026-11"}}
+
+entry_points:
+  - id: "POST /v1/upload/sbom"
+    component: auth
+    parameters:
+      - name: Authorization header (Bearer JWT)
+        attacker_controllable: true
+        control_kinds: [data, serialized-state]
+        caller_must_enforce: "none — P-SIG"
+        provenance: {kind: documented, source: "DESIGN.md §4.1 request headers"}
+      - name: unverified JWT iss claim
+        attacker_controllable: true
+        control_kinds: [resource-name]
+        caller_must_enforce: "none — P-ISSUER-PIN"
+        provenance: {kind: documented, source: "DESIGN.md §3.1.1 step 2"}
+      - name: JWT header kid and alg
+        attacker_controllable: true
+        control_kinds: [data, type-class]
+        caller_must_enforce: "none — P-SIG"
+        provenance: {kind: documented, source: "DESIGN.md §3.1.1 step 4 Verify signature using RSA256"}
+      - name: verified claims (aud, exp, iat, repository, repository_owner_id, event_name)
+        attacker_controllable: true
+        control_kinds: [data]
+        caller_must_enforce: "none — P-SIG, P-WORKLOAD-BIND"
+        provenance: {kind: documented, source: "DESIGN.md §3.1.1 steps 5–6"}
+      - name: Content-Type, malformed or non-UTF-8 body
+        attacker_controllable: true
+        control_kinds: [data, type-class]
+        caller_must_enforce: "none — P-ERRORS"
+        provenance: {kind: documented, source: "CHANGELOG 0.9.0 #110"}
+      - name: OIDC discovery document (jwks_uri and the rest)
+        attacker_controllable: true
+        control_kinds: [data, size, resource-name]
+        caller_must_enforce: "none — P-ISSUER-PIN, P-ISSUER-BOUND"
+        provenance: {kind: documented, source: "DESIGN.md §3.1.1 step 3"}
+      - name: JWKS document
+        attacker_controllable: true
+        control_kinds: [data, size, serialized-state]
+        caller_must_enforce: "none — P-ISSUER-BOUND"
+        provenance: {kind: documented, source: "DESIGN.md §3.1.1 step 3"}
+  - id: "POST /v1/upload/sbom [body]"
+    component: upload-relay
+    parameters:
+      - name: product_name
+        attacker_controllable: true
+        control_kinds: [resource-name]
+        caller_must_enforce: "none — P-WORKLOAD-BIND"
+        provenance: {kind: documented, source: "README authorization note"}
+      - name: product_version, is_latest
+        attacker_controllable: true
+        control_kinds: [data]
+        obligation_id: validate-sbom-at-dt
+        caller_must_enforce: "DependencyTrack validates; PIA relays verbatim (D-SBOM-VALIDATION)"
+        provenance: {kind: documented, source: "DESIGN.md §3.1 step 6"}
+      - name: bom (base64 CycloneDX)
+        attacker_controllable: true
+        control_kinds: [data, size]
+        obligation_id: proxy-body-cap
+        caller_must_enforce: "reverse proxy caps the request body; DependencyTrack validates content (D-SBOM-VALIDATION)"
+        provenance: {kind: documented, source: "DESIGN.md §3.1 step 3"}
+      - name: DependencyTrack response (status, body, token)
+        attacker_controllable: false
+        control_kinds: [data]
+        caller_must_enforce: "none — relayed verbatim to the client (D-DT-RESPONSE)"
+        provenance: {kind: documented, source: "DESIGN.md §4.1 Relay DependencyTrack status code and body verbatim"}
+  - id: "any route"
+    component: ops-endpoints
+    parameters:
+      - name: HTTP method, path, X-Request-ID header
+        attacker_controllable: true
+        control_kinds: [data]
+        caller_must_enforce: "none — P-METRIC-CARD"
+        provenance: {kind: documented, source: "DESIGN.md §5.4 Label cardinality; pia/main.py assign_request_id docstring"}
+  - id: "GET /livez"
+    component: ops-endpoints
+    parameters:
+      - name: query and headers (ignored)
+        attacker_controllable: true
+        control_kinds: [data]
+        caller_must_enforce: "none — unused by the handler"
+        provenance: {kind: documented, source: "DESIGN.md §4.1"}
+  - id: "GET /metrics"
+    component: ops-endpoints
+    parameters:
+      - name: query and headers (ignored)
+        attacker_controllable: true
+        control_kinds: [data]
+        caller_must_enforce: "none — unused by the handler"
+        provenance: {kind: documented, source: "DESIGN.md §4.1"}
+  - id: "pia sync FILE"
+    component: operator-tooling
+    parameters:
+      - name: curated YAML file
+        attacker_controllable: false
+        control_kinds: [data, serialized-state, resource-name]
+        obligation_id: curate-authorization-file
+        caller_must_enforce: "keep the curated file correct and canonical; review every sync plan"
+        provenance: {kind: documented, source: "DESIGN.md §5.5 curated projects file"}
+      - name: PIA_DATABASE_URL, PIA_DEPENDENCY_TRACK_API_KEY, PIA_GITHUB_TOKEN, --dt-url
+        attacker_controllable: false
+        control_kinds: [data, resource-name]
+        obligation_id: protect-operator-secrets
+        caller_must_enforce: "keep secrets out of logs and shell history"
+        provenance: {kind: documented, source: "pia/cli.py module docstring"}
+      - name: GitHub and DependencyTrack API responses
+        attacker_controllable: false
+        control_kinds: [data]
+        caller_must_enforce: "none — trusted collaborator output (§1.10)"
+        provenance: {kind: documented, source: "pia/sync.py build_desired docstring"}
+  - id: "pia create-dt-projects FILE"
+    component: operator-tooling
+    parameters:
+      - name: curated YAML file
+        attacker_controllable: false
+        control_kinds: [data, serialized-state, resource-name]
+        obligation_id: curate-authorization-file
+        caller_must_enforce: "keep the curated file correct and canonical; review every sync plan"
+        provenance: {kind: documented, source: "DESIGN.md §5.5 curated projects file"}
+      - name: PIA_DEPENDENCY_TRACK_API_KEY, --dt-url
+        attacker_controllable: false
+        control_kinds: [data, resource-name]
+        obligation_id: protect-operator-secrets
+        caller_must_enforce: "keep secrets out of logs and shell history"
+        provenance: {kind: documented, source: "pia/cli.py module docstring"}
+  - id: "alembic upgrade head"
+    component: operator-tooling
+    parameters:
+      - name: PIA_DATABASE_URL and shipped migration scripts
+        attacker_controllable: false
+        control_kinds: [data, resource-name]
+        obligation_id: run-migrations-out-of-band
+        caller_must_enforce: "run with migration credentials, before rollout"
+        provenance: {kind: documented, source: "README Database Migration"}
+  - id: "app start"
+    component: auth
+    parameters:
+      - name: PIA_* settings
+        attacker_controllable: false
+        control_kinds: [data, resource-name]
+        obligation_id: configure-per-1.6
+        caller_must_enforce: "set per §1.6"
+        provenance: {kind: documented, source: "DESIGN.md §4.2"}
+
+contract_dimensions:
+  - {component: auth, dimension: numeric-domain, status: claimed, conditions: "issuer responses ≤ 1 MiB decoded; exp/iat checked as numbers; iss must be a string", property_id: P-ISSUER-BOUND, provenance: {kind: documented, source: "DESIGN.md §3.1.1 step 3; CHANGELOG 0.9.0 #109"}}
+  - {component: auth, dimension: failure-atomicity, status: not-applicable, conditions: "no state is mutated; every request is independent and the database is read-only for the app", provenance: {kind: documented, source: "README runtime database user only needs read access"}}
+  - {component: auth, dimension: recursive-cyclic-topology, status: not-applicable, conditions: "inputs are flat JSON documents; nesting depth is the runtime JSON parser's contract (§1.9)", provenance: {kind: documented, source: "DESIGN.md §5.1 PyJWT entry"}}
+  - {component: auth, dimension: callback-execution, status: claimed, conditions: "the issuer's jwks_uri is followed only under the issuer URL; no redirects", property_id: P-ISSUER-PIN, provenance: {kind: documented, source: "CHANGELOG 0.9.0 #113"}}
+  - {component: auth, dimension: serialization-reconstruction, status: claimed, conditions: "JWT and JWKS parsed by PyJWT as JSON; keys reconstructed as RSA public keys used only to verify RS256", property_id: P-SIG, provenance: {kind: documented, source: "DESIGN.md §3.1.1 step 4"}}
+  - {component: auth, dimension: reference-lifecycle, status: disclaimed, conditions: "a token is accepted any number of times until exp; no jti tracking", property_id: D-REPLAY, provenance: {kind: documented, source: "DESIGN.md §10 Protect against replayed tokens"}}
+  - {component: auth, dimension: concurrency-reentrancy, status: claimed, conditions: "a slow issuer holds one threadpool worker; about 40 concurrent slow requests exhaust the pool", property_id: P-NO-STALL, provenance: {kind: documented, source: "PR #112 description About 40 such requests"}}
+  - {component: auth, dimension: resource-complexity, status: disclaimed, conditions: "per request up to two outbound fetches, each 10 s per read and 1 MiB; no cap on request volume and no bound on total time against a trickling issuer", property_id: D-RATE-LIMIT, provenance: {kind: documented, source: "DESIGN.md §8.3 rate limiting at the reverse proxy; §10 slow retrieval"}}
+  - {component: upload-relay, dimension: numeric-domain, status: disclaimed, conditions: "no size cap on bom; the binding limit is DependencyTrack's 20,000,000-character cap and the proxy's body limit", property_id: D-SBOM-VALIDATION, provenance: {kind: documented, source: "issue #111 The binding limit today is DT's"}}
+  - {component: upload-relay, dimension: failure-atomicity, status: disclaimed, conditions: "a 500 or 502 does not mean the SBOM was not stored; retry may duplicate it", property_id: D-EXTERNAL-ATOMICITY, provenance: {kind: documented, source: "pia/main.py upload_sbom comment a retry is NOT safe"}}
+  - {component: upload-relay, dimension: recursive-cyclic-topology, status: not-applicable, conditions: "the body schema is four flat fields; the SBOM is an opaque string", provenance: {kind: documented, source: "DESIGN.md §4.1 request body"}}
+  - {component: upload-relay, dimension: callback-execution, status: disclaimed, conditions: "DependencyTrack's response is relayed verbatim; PIA does not sanitize it", property_id: D-DT-RESPONSE, provenance: {kind: documented, source: "DESIGN.md §4.1 verbatim"}}
+  - {component: upload-relay, dimension: serialization-reconstruction, status: claimed, conditions: "the SBOM is never decoded or parsed by PIA", property_id: P-SBOM-OPAQUE, provenance: {kind: documented, source: "DESIGN.md §3.1 step 3"}}
+  - {component: upload-relay, dimension: reference-lifecycle, status: claimed, conditions: "the target project is resolved per request from the database; a pia sync change applies to the next request", property_id: P-WORKLOAD-BIND, provenance: {kind: documented, source: "DESIGN.md §3.1 step 5"}}
+  - {component: upload-relay, dimension: concurrency-reentrancy, status: claimed, conditions: "the DependencyTrack call has connect/read timeouts and runs in the threadpool", property_id: P-NO-STALL, provenance: {kind: documented, source: "pia/dependencytrack.py TIMEOUT docstring"}}
+  - {component: upload-relay, dimension: resource-complexity, status: disclaimed, conditions: "the whole body, its parse, and the base64 string sit in memory at once", property_id: D-SBOM-VALIDATION, provenance: {kind: documented, source: "issue #111 Memory in PIA"}}
+  - {component: ops-endpoints, dimension: numeric-domain, status: claimed, conditions: "every label value comes from a fixed set, a route template, or a database row", property_id: P-METRIC-CARD, provenance: {kind: documented, source: "DESIGN.md §5.4 Label cardinality"}}
+  - {component: ops-endpoints, dimension: failure-atomicity, status: not-applicable, conditions: "counters only increment; no transactional state", provenance: {kind: documented, source: "pia/metrics.py module docstring"}}
+  - {component: ops-endpoints, dimension: recursive-cyclic-topology, status: not-applicable, conditions: "no structured input", provenance: {kind: documented, source: "DESIGN.md §4.1"}}
+  - {component: ops-endpoints, dimension: callback-execution, status: not-applicable, conditions: "no collaborator; /livez is static and /metrics reads process memory", provenance: {kind: documented, source: "pia/main.py livez docstring"}}
+  - {component: ops-endpoints, dimension: serialization-reconstruction, status: not-applicable, conditions: "output only (text exposition)", provenance: {kind: documented, source: "DESIGN.md §4.1"}}
+  - {component: ops-endpoints, dimension: reference-lifecycle, status: claimed, conditions: "one request ID per request, generated server-side, reset after the request", property_id: P-LOG-ESCAPE, provenance: {kind: documented, source: "pia/main.py assign_request_id docstring"}}
+  - {component: ops-endpoints, dimension: concurrency-reentrancy, status: claimed, conditions: "handlers are async and do no blocking I/O, so they answer while the threadpool is busy", property_id: P-NO-STALL, provenance: {kind: documented, source: "CHANGELOG 0.9.0 no longer stalls all other requests"}}
+  - {component: ops-endpoints, dimension: resource-complexity, status: claimed, conditions: "registry size is bounded by label cardinality; /metrics is unauthenticated but not routed publicly (D-METRICS-AUTH)", property_id: P-METRIC-CARD, provenance: {kind: documented, source: "DESIGN.md §4.1 and §5.4"}}
+  - {component: operator-tooling, dimension: numeric-domain, status: disclaimed, conditions: "no limits on file size, project count, or API response size", property_id: D-CLI-BOUNDS, provenance: {kind: documented, source: "DESIGN.md §5.5 states no limits"}}
+  - {component: operator-tooling, dimension: failure-atomicity, status: claimed, conditions: "pia sync applies its plan in one transaction and commits at the end; create-dt-projects is idempotent but not atomic (D-EXTERNAL-ATOMICITY)", property_id: P-SYNC-ATOMIC, provenance: {kind: documented, source: "pia/sync.py apply_plan docstring; pia/cli.py create_dt_projects help Idempotent"}}
+  - {component: operator-tooling, dimension: recursive-cyclic-topology, status: not-applicable, conditions: "the file schema is two levels deep with extra=forbid", provenance: {kind: documented, source: "pia/sync.py module docstring file example"}}
+  - {component: operator-tooling, dimension: callback-execution, status: not-applicable, conditions: "GitHub and DependencyTrack are trusted collaborators whose answers are taken as true (§1.10)", provenance: {kind: documented, source: "pia/sync.py build_desired docstring"}}
+  - {component: operator-tooling, dimension: serialization-reconstruction, status: not-applicable, conditions: "the file is operator-trusted and loaded with yaml.safe_load, which constructs no arbitrary objects", provenance: {kind: documented, source: "DESIGN.md §5.5 curated"}}
+  - {component: operator-tooling, dimension: reference-lifecycle, status: claimed, conditions: "rows are keyed by their business columns; a changed row is a delete plus a create", property_id: P-SYNC-ATOMIC, provenance: {kind: documented, source: "pia/sync.py compute_plan docstring"}}
+  - {component: operator-tooling, dimension: concurrency-reentrancy, status: disclaimed, conditions: "no lock between concurrent pia sync runs", property_id: D-CLI-BOUNDS, provenance: {kind: documented, source: "DESIGN.md §5.5 makes no concurrency statement"}}
+  - {component: operator-tooling, dimension: resource-complexity, status: disclaimed, conditions: "GitHub and DependencyTrack calls carry no timeout; interactive use", property_id: D-CLI-BOUNDS, provenance: {kind: documented, source: "DESIGN.md §5.5 makes no resource statement"}}
+
+outputs:
+  - component: upload-relay
+    channel: dependencytrack-upload-request
+    taint: same-as-input
+    taint_provenance: {kind: documented, source: "DESIGN.md §3.1 step 6"}
+    invariants:
+      - id: sbom-relayed-byte-identical
+        statement: "the bom string reaches DependencyTrack byte-identical and undecoded"
+        property_id: P-SBOM-OPAQUE
+        provenance: {kind: documented, source: "DESIGN.md §3.1 step 3"}
+    downstream_must_not_assume:
+      - id: sbom-well-formed
+        statement: "the SBOM is well-formed CycloneDX, the version string is sane, or the name was vetted beyond matching a registered product"
+        provenance: {kind: documented, source: "DESIGN.md §3.1 step 6"}
+  - component: upload-relay
+    channel: polling-url
+    taint: constrained
+    taint_provenance: {kind: documented, source: "pia/main.py upload_sbom polling_url assembly"}
+    invariants: []
+    downstream_must_not_assume:
+      - id: polling-url-reachable
+        statement: "the polling URL is reachable from outside the cluster"
+        provenance: {kind: documented, source: "issue #66 polling_url should be externally reachable"}
+  - component: upload-relay
+    channel: relayed-dependencytrack-error
+    taint: same-as-input
+    taint_provenance: {kind: documented, source: "DESIGN.md §4.1 Relay DependencyTrack status code and body verbatim"}
+    invariants: []
+    downstream_must_not_assume:
+      - id: dt-error-body-is-json
+        statement: "the relayed body is JSON, or free of content echoed from the SBOM"
+        provenance: {kind: documented, source: "DESIGN.md §4.1 verbatim"}
+  - component: auth
+    channel: error-responses-401-422-502-500
+    taint: constrained
+    taint_provenance: {kind: documented, source: "DESIGN.md §4.1 response list; PR #99 description nothing to withhold"}
+    invariants: []
+    downstream_must_not_assume:
+      - id: 401-reason-granularity
+        statement: "a 401 distinguishes unknown issuer from unregistered workload beyond the stated reason strings"
+        provenance: {kind: documented, source: "DESIGN.md §4.1 response list"}
+      - id: 401-hides-registered-issuer
+        statement: "the 401 reason hides whether a Jenkins issuer URL is registered (D-ISSUER-ENUMERATION)"
+        provenance: {kind: maintainer, date: "2026-07"}
+  - component: ops-endpoints
+    channel: x-request-id-header
+    taint: constrained
+    taint_provenance: {kind: documented, source: "pia/main.py assign_request_id docstring"}
+    invariants:
+      - id: request-id-server-generated
+        statement: "the request ID is 16 server-generated hex characters, never taken from the request"
+        property_id: P-LOG-ESCAPE
+        provenance: {kind: documented, source: "pia/main.py assign_request_id docstring"}
+    downstream_must_not_assume:
+      - id: request-id-correlates-inbound
+        statement: "the response ID correlates with an inbound X-Request-ID header"
+        provenance: {kind: documented, source: "pia/main.py assign_request_id docstring"}
+  - component: auth
+    channel: log-lines
+    taint: sanitized
+    taint_provenance: {kind: documented, source: "pia/main.py LOGGED_CLAIMS and _claims_summary docstrings"}
+    invariants:
+      - id: caller-text-escaped-in-logs
+        statement: "pre-authentication caller values are ASCII-escaped; the bearer token and API key never appear"
+        property_id: P-LOG-ESCAPE
+        provenance: {kind: documented, source: "CHANGELOG 0.3.0 #60"}
+      - id: authed-caller-text-escaped-in-logs
+        statement: "post-authentication caller values are ASCII-escaped and each line names the caller's real ef_project_id"
+        property_id: P-LOG-ESCAPE-AUTHED
+        provenance: {kind: maintainer, date: "2026-10"}
+    downstream_must_not_assume:
+      - id: logs-free-of-attacker-text
+        statement: "a log line is free of attacker-chosen text; it is escaped, not absent"
+        provenance: {kind: documented, source: "pia/main.py _claims_summary docstring"}
+  - component: ops-endpoints
+    channel: metrics-text-exposition
+    taint: constrained
+    taint_provenance: {kind: documented, source: "DESIGN.md §5.4 Label cardinality"}
+    invariants:
+      - id: no-raw-request-value-as-label
+        statement: "label values are fixed sets, route templates, or database rows; never raw request input"
+        property_id: P-METRIC-CARD
+        provenance: {kind: documented, source: "DESIGN.md §5.4 Label cardinality"}
+    downstream_must_not_assume:
+      - id: metrics-private
+        statement: "the endpoint is private unless the ingress keeps it so"
+        provenance: {kind: documented, source: "DESIGN.md §4.1"}
+  - component: operator-tooling
+    channel: cli-stdout-plan
+    taint: constrained
+    taint_provenance: {kind: documented, source: "pia/sync.py format_plan docstring"}
+    invariants: []
+    downstream_must_not_assume: []
+  - component: operator-tooling
+    channel: database-rows
+    taint: constrained
+    taint_provenance: {kind: documented, source: "pia/models.py comment the curated file is the only writer"}
+    invariants: []
+    downstream_must_not_assume:
+      - id: rows-written-elsewhere-coherent
+        statement: "rows written by anything other than pia sync are coherent"
+        provenance: {kind: documented, source: "pia/models.py DependencyTrackProject comment pia sync guarantees coherency"}
+
+adversaries:
+  - name: unauthenticated-network-client
+    scope: in
+    capabilities: [reach-upload-endpoint, supply-any-header-and-body, supply-unsigned-jwt-with-any-iss, repeat-at-proxy-rate-limit]
+    excluded_capabilities: [sign-with-registered-issuer-key, control-registered-issuer, control-dependencytrack, control-database, read-pod-environment, intercept-outbound-connections]
+    goals: [ssrf, service-stall, auth-bypass, log-forgery, error-path-crash]
+    provenance: {kind: maintainer, date: "2026-11"}
+  - name: non-maintainer-contributor
+    scope: in
+    capabilities: [open-pull-requests, comment, fork, trigger-pull_request_target-workflow_run-issue_comment]
+    excluded_capabilities: [cause-push-workflow_dispatch-release-schedule-run, author-workflow-file]
+    goals: [publish-sbom-as-project]
+    provenance: {kind: documented, source: "pia/models.py GITHUB_ALLOWED_EVENT_NAMES docstring"}
+  - name: registered-workload
+    scope: in
+    capabilities: [hold-valid-token-for-own-identity, choose-product-name-version-latest-bom, replay-token-until-exp]
+    excluded_capabilities: [obtain-token-for-other-workload, change-registrations]
+    goals: [cross-project-write, feed-dependencytrack-malformed-content]
+    provenance: {kind: documented, source: "README authorization note; DESIGN.md §4.3 Authorization Boundary"}
+  - name: registered-issuer
+    scope: in
+    capabilities: [serve-any-discovery-and-jwks-content, sign-tokens-for-own-workloads, trickle-responses]
+    excluded_capabilities: [steer-fetches-off-own-origin-and-path, exceed-1mib-per-response, have-keys-accepted-for-other-issuer]
+    goals: [cross-issuer-key-substitution, ssrf-pivot, worker-exhaustion]
+    provenance: {kind: documented, source: "PR #113 description one project's Jenkins instance cannot point PIA at another project's keys; PR #112 description Known limitation (accepted risk)"}
+  - name: project-insider
+    scope: out
+    capabilities: [create-repositories-under-registered-owner, recreate-deleted-or-renamed-repository, trigger-allowlisted-publish-events]
+    excluded_capabilities: []
+    goals: []
+    provenance: {kind: maintainer, date: "2026-10"}
+  - name: operator
+    scope: out
+    capabilities: [curate-file, hold-secrets, deploy]
+    excluded_capabilities: []
+    goals: []
+    provenance: {kind: documented, source: "DESIGN.md §2.2 managed by Eclipse Foundation"}
+  - name: dependencytrack-and-postgresql
+    scope: out
+    capabilities: [answer-pia-requests-with-anything]
+    excluded_capabilities: []
+    goals: []
+    provenance: {kind: documented, source: "DESIGN.md §2.2 item 3"}
+  - name: network-attacker-on-outbound-paths
+    scope: out
+    capabilities: [intercept-outbound-connections]
+    excluded_capabilities: []
+    goals: []
+    provenance: {kind: maintainer, date: "2026-11"}
+  - name: host-pod-or-cluster-attacker
+    scope: out
+    capabilities: [read-pod-environment, read-memory, use-database-credentials]
+    excluded_capabilities: []
+    goals: []
+    provenance: {kind: maintainer, date: "2026-11"}
+
+dependency_policy:
+  zero_runtime_dependencies: false
+  provenance: {kind: documented, source: "pyproject.toml [project] dependencies"}
+
+dependencies:
+  - name: pyjwt
+    relied_on_for: "RS256 verification, exp/iat/aud checks with require, JWKS parsing into verify-only keys"
+    relied_on_properties: [rs256-signature-verification, registered-claim-validation]
+    caller_obligations_acknowledged: []
+    adversary_capabilities_forwarded: [supply-unsigned-jwt-with-any-iss, serve-any-discovery-and-jwks-content]
+    outputs_consumed: []
+    covered_here: false
+    violation_disposition: "OUT-OF-MODEL: dependency-contract"
+    provenance: {kind: documented, source: "DESIGN.md §5.1 PyJWT"}
+  - name: cryptography
+    relied_on_for: "RSA public-key operations behind PyJWT"
+    relied_on_properties: [rsa-pkcs1v15-sha256-verification]
+    caller_obligations_acknowledged: []
+    adversary_capabilities_forwarded: [serve-any-discovery-and-jwks-content]
+    outputs_consumed: []
+    covered_here: false
+    violation_disposition: "OUT-OF-MODEL: dependency-contract"
+    provenance: {kind: documented, source: "pyproject.toml pyjwt[crypto]"}
+  - name: requests
+    relied_on_for: "TLS verification by default, allow_redirects=False honoured, timeout as per-read gap, read1 after one socket read"
+    relied_on_properties: [tls-certificate-verification, no-redirect-following-when-disabled, per-read-timeout]
+    caller_obligations_acknowledged: []
+    adversary_capabilities_forwarded: [supply-unsigned-jwt-with-any-iss, serve-any-discovery-and-jwks-content, trickle-responses]
+    outputs_consumed: []
+    covered_here: false
+    violation_disposition: "OUT-OF-MODEL: dependency-contract"
+    provenance: {kind: documented, source: "pia/oidc.py _fetch_json docstring"}
+  - name: urllib3
+    relied_on_for: "connection pooling, decode_content, read1 semantics under requests"
+    relied_on_properties: [per-read-timeout, bounded-decompression-per-read]
+    caller_obligations_acknowledged: []
+    adversary_capabilities_forwarded: [serve-any-discovery-and-jwks-content, trickle-responses]
+    outputs_consumed: []
+    covered_here: false
+    violation_disposition: "OUT-OF-MODEL: dependency-contract"
+    provenance: {kind: documented, source: "pia/oidc.py _fetch_json docstring"}
+  - name: fastapi
+    relied_on_for: "body and header parsing, 422 generation, running def handlers in the threadpool, middleware order"
+    relied_on_properties: [request-validation, threadpool-offload-for-sync-handlers]
+    caller_obligations_acknowledged: []
+    adversary_capabilities_forwarded: [supply-any-header-and-body]
+    outputs_consumed: []
+    covered_here: false
+    violation_disposition: "OUT-OF-MODEL: dependency-contract"
+    provenance: {kind: documented, source: "DESIGN.md §5.1 FastAPI"}
+  - name: pydantic
+    relied_on_for: "schema validation of the upload body, settings and the curated file"
+    relied_on_properties: [schema-validation]
+    caller_obligations_acknowledged: []
+    adversary_capabilities_forwarded: [supply-any-header-and-body]
+    outputs_consumed: []
+    covered_here: false
+    violation_disposition: "OUT-OF-MODEL: dependency-contract"
+    provenance: {kind: documented, source: "DESIGN.md §5.1 FastAPI built-in model validation"}
+  - name: pydantic-settings
+    relied_on_for: "PIA_* environment parsing"
+    relied_on_properties: [environment-parsing]
+    caller_obligations_acknowledged: []
+    adversary_capabilities_forwarded: []
+    outputs_consumed: []
+    covered_here: false
+    violation_disposition: "OUT-OF-MODEL: dependency-contract"
+    provenance: {kind: documented, source: "DESIGN.md §4.2"}
+  - name: uvicorn
+    relied_on_for: "HTTP/1.1 parsing, header and line limits, keep-alive, request-smuggling resistance"
+    relied_on_properties: [http-parsing-correctness, header-size-limits]
+    caller_obligations_acknowledged: []
+    adversary_capabilities_forwarded: [supply-any-header-and-body]
+    outputs_consumed: []
+    covered_here: false
+    violation_disposition: "OUT-OF-MODEL: dependency-contract"
+    provenance: {kind: documented, source: "DESIGN.md §8.1 Production ASGI server (e.g., uvicorn)"}
+  - name: sqlalchemy
+    relied_on_for: "parameterized queries, pooling with pool_pre_ping"
+    relied_on_properties: [parameterized-queries, pool-liveness]
+    caller_obligations_acknowledged: []
+    adversary_capabilities_forwarded: [supply-unsigned-jwt-with-any-iss]
+    outputs_consumed: []
+    covered_here: false
+    violation_disposition: "OUT-OF-MODEL: dependency-contract"
+    provenance: {kind: documented, source: "CHANGELOG 0.6.0 DB connection loss"}
+  - name: psycopg2-binary
+    relied_on_for: "PostgreSQL driver and parameter binding"
+    relied_on_properties: [parameterized-queries]
+    caller_obligations_acknowledged: []
+    adversary_capabilities_forwarded: [supply-unsigned-jwt-with-any-iss]
+    outputs_consumed: []
+    covered_here: false
+    violation_disposition: "OUT-OF-MODEL: dependency-contract"
+    provenance: {kind: documented, source: "DESIGN.md §5.1 psycopg2"}
+  - name: alembic
+    relied_on_for: "migration execution under the migration credentials"
+    relied_on_properties: [migration-execution]
+    caller_obligations_acknowledged: [run-migrations-out-of-band]
+    adversary_capabilities_forwarded: []
+    outputs_consumed: []
+    covered_here: false
+    violation_disposition: "OUT-OF-MODEL: dependency-contract"
+    provenance: {kind: documented, source: "README Database Migration"}
+  - name: click
+    relied_on_for: "CLI argument parsing"
+    relied_on_properties: [argument-parsing]
+    caller_obligations_acknowledged: []
+    adversary_capabilities_forwarded: []
+    outputs_consumed: []
+    covered_here: false
+    violation_disposition: "OUT-OF-MODEL: dependency-contract"
+    provenance: {kind: documented, source: "DESIGN.md §5.1 click"}
+  - name: pyyaml
+    relied_on_for: "safe_load of the curated file without arbitrary object construction"
+    relied_on_properties: [safe-load-no-object-construction]
+    caller_obligations_acknowledged: [curate-authorization-file]
+    adversary_capabilities_forwarded: []
+    outputs_consumed: []
+    covered_here: false
+    violation_disposition: "OUT-OF-MODEL: dependency-contract"
+    provenance: {kind: documented, source: "DESIGN.md §5.1; pia/sync.py load_projects_file"}
+  - name: prometheus-client
+    relied_on_for: "default registry and text exposition"
+    relied_on_properties: [registry-correctness]
+    caller_obligations_acknowledged: []
+    adversary_capabilities_forwarded: []
+    outputs_consumed: []
+    covered_here: false
+    violation_disposition: "OUT-OF-MODEL: dependency-contract"
+    provenance: {kind: documented, source: "DESIGN.md §5.1 prometheus_client"}
+
+build_policy:
+  security_relevant_flags_present: true
+  provenance: {kind: documented, source: "DESIGN.md §4.2 Settings"}
+
+build_flags:
+  - name: PIA_EXPECTED_AUDIENCE
+    default: "pia.eclipse.org"
+    security_relevant: true
+    maintainer_stance: supported
+    affects_properties:
+      - {property_id: P-SIG, effect: preserves}
+    provenance: {kind: documented, source: "DESIGN.md §4.2 and §7.2 Set audience, to prevent cross-service token replay"}
+  - name: PIA_DEPENDENCY_TRACK_URL-http-scheme
+    default: "https://sbom.eclipse.org/api/v1/bom"
+    security_relevant: true
+    maintainer_stance: dev-only
+    affects_properties:
+      - {property_id: P-OUTBOUND-TLS, effect: voids}
+    provenance: {kind: maintainer, date: "2026-11"}
+  - name: PIA_DATABASE_URL-without-sslmode
+    default: "none (required)"
+    security_relevant: false
+    maintainer_stance: supported
+    affects_properties: []
+    provenance: {kind: maintainer, date: "2026-11"}
+  - name: uvicorn--workers
+    default: "1"
+    security_relevant: false
+    maintainer_stance: unsupported
+    affects_properties: []
+    provenance: {kind: documented, source: "DESIGN.md §5.4 Single worker"}
+  - name: uvicorn--reload-and-migrations-on-start
+    default: "off"
+    security_relevant: false
+    maintainer_stance: dev-only
+    affects_properties: []
+    provenance: {kind: documented, source: "docker-compose.yml comments"}
+  - name: pia-sync--allow-db-updates-and-deletions
+    default: "off"
+    security_relevant: false
+    maintainer_stance: supported
+    affects_properties: []
+    provenance: {kind: documented, source: "pia/cli.py option help Explicit intent is required"}
+
+properties_claimed:
+  - {id: P-SIG, kind: authentication, components: [auth], tier: security-critical, conditions: "RS256 only; key fetched per request from the allowlisted issuer's JWKS, kid match, use sig or absent; aud equals PIA_EXPECTED_AUDIENCE; exp unexpired; iat present", violation_symptoms: [integrity-bypass], provenance: {kind: documented, source: "DESIGN.md §3.1.1 steps 3–4"}}
+  - {id: P-ISSUER-PIN, kind: x-outbound-confinement, components: [auth], tier: security-critical, conditions: "iss equals the GitHub issuer or a registered Jenkins issuer; jwks_uri under {iss}/ with unreserved characters and no dot segments; no redirects; HTTP 200 only", violation_symptoms: [x-outbound-request-to-unlisted-host], provenance: {kind: documented, source: "DESIGN.md §3.1.1 steps 2–3; CHANGELOG 0.6.0 #84 and 0.9.0 #113"}}
+  - {id: P-ISSUER-BOUND, kind: resource-bound, components: [auth], tier: security-critical, conditions: "each discovery and JWKS response: 10 s per read, 1 MiB decoded cap, 10 s deadline checked between reads; total wall time is not bounded (D-SLOW-RETRIEVAL)", violation_symptoms: [unbounded-allocation], provenance: {kind: documented, source: "DESIGN.md §3.1.1 step 3"}}
+  - {id: P-WORKLOAD-BIND, kind: integrity, components: [auth, upload-relay], tier: security-critical, conditions: "verified claims match exactly one registered workload; GitHub event_name in {push, workflow_dispatch, release, schedule}; product_name resolved only within the workload's ef_project_id; registrations are operator input", violation_symptoms: [integrity-bypass], provenance: {kind: documented, source: "README authorization note; DESIGN.md §3.1.1 steps 5–6 and §4.3"}}
+  - {id: P-NO-STALL, kind: availability, components: [auth, upload-relay, ops-endpoints], tier: security-critical, conditions: "fewer than about 40 concurrent slow requests; DependencyTrack call has 5 s connect and 30 s read timeouts", violation_symptoms: [hang], provenance: {kind: documented, source: "CHANGELOG 0.9.0 #112; PR #112 description"}}
+  - {id: P-LOG-ESCAPE, kind: output-sanitization, components: [auth, ops-endpoints], tier: security-critical, conditions: "values logged before the signature check passes (unverified iss, decode and verification errors) are escaped with !a; request ID server-generated; token and API key never logged", violation_symptoms: [x-log-forgery, info-leak], provenance: {kind: documented, source: "CHANGELOG 0.3.0 #60"}}
+  - {id: P-LOG-ESCAPE-AUTHED, kind: output-sanitization, components: [auth, upload-relay], tier: correctness-only, conditions: "values logged after a token verified for a registered workload (claims summary, product_name, product_version, DependencyTrack body) are escaped with !a; the fixed line text names the caller's real ef_project_id", violation_symptoms: [x-log-forgery], provenance: {kind: maintainer, date: "2026-10"}}
+  - {id: P-ERRORS, kind: correctness, components: [auth, upload-relay], tier: correctness-only, conditions: "malformed POST data yields 422 without echoing the body; token problems yield 401; DependencyTrack failure yields 502 or the relayed status; an unhandled 500 on malformed unauthenticated input is a bug, not a vulnerability (maintainer ruling 2026-10)", violation_symptoms: [crash], provenance: {kind: documented, source: "DESIGN.md §5.3; CHANGELOG 0.9.0 #109, #110"}}
+  - {id: P-METRIC-CARD, kind: resource-bound, components: [ops-endpoints], tier: security-critical, conditions: "method collapses to a fixed set, path is the route template or <unmatched>, reason/outcome are Literal, product_name labeled only after resolving to a database row", violation_symptoms: [unbounded-allocation], provenance: {kind: documented, source: "DESIGN.md §5.4 Label cardinality"}}
+  - {id: P-OUTBOUND-TLS, kind: confidentiality, components: [auth, upload-relay, operator-tooling], tier: security-critical, conditions: "issuer URLs are HTTPS by construction; requests verifies certificates by default; DependencyTrack URL is https (an http URL is dev-only, §1.6)", violation_symptoms: [info-leak], provenance: {kind: maintainer, date: "2026-11"}}
+  - {id: P-SBOM-OPAQUE, kind: correctness, components: [upload-relay], tier: correctness-only, conditions: "bom relayed byte-identical and never decoded", violation_symptoms: [wrong-output], provenance: {kind: documented, source: "DESIGN.md §3.1 step 3"}}
+  - {id: P-SYNC-ATOMIC, kind: correctness, components: [operator-tooling], tier: correctness-only, conditions: "pia sync prints its plan, refuses deletions/updates without --allow-db-updates-and-deletions, applies in one transaction, commits once; validator rejects duplicate ids, workload URLs and DependencyTrack names", violation_symptoms: [x-partial-authorization-state], provenance: {kind: documented, source: "pia/cli.py sync help; DESIGN.md §5.5"}}
+
+properties_disclaimed:
+  - {id: D-REPLAY, components: [auth], conditions: "within the token's lifetime; no jti tracking; stated limit, not silence", tier: security-critical, false_friend: false, provenance: {kind: documented, source: "issue #9; DESIGN.md §10 Protect against replayed tokens"}}
+  - {id: D-SLOW-RETRIEVAL, components: [auth], conditions: "requires control of a registered issuer; availability only; accepted risk; the 10 s TIMEOUT is per read, not a total deadline", tier: security-critical, false_friend: true, provenance: {kind: documented, source: "DESIGN.md §10 PIA currently does not prevent slow retrieval attacks; PR #112 description accepted risk"}}
+  - {id: D-RATE-LIMIT, components: [auth, upload-relay, ops-endpoints], conditions: "the reverse proxy owns rate limiting; every unauthenticated request may cost two outbound fetches and a database query", tier: security-critical, false_friend: false, provenance: {kind: documented, source: "DESIGN.md §8.1 Reverse proxy for TLS termination and rate limiting; §8.3 Rate limiting per project/IP at reverse proxy level"}}
+  - {id: D-SBOM-VALIDATION, components: [upload-relay], conditions: "authenticated workloads; PIA neither parses the SBOM nor bounds the body; DependencyTrack and the proxy do", tier: security-critical, false_friend: false, provenance: {kind: documented, source: "DESIGN.md §3.1 step 3; issue #111"}}
+  - {id: D-PRODUCT-LEAST-PRIV, components: [auth, upload-relay], conditions: "within one EF project; any registered workload may publish to every product of that EF project", tier: security-critical, false_friend: false, provenance: {kind: documented, source: "README authorization note; issue #39 decision Option A"}}
+  - {id: D-EVENT-SEMANTICS, components: [auth], conditions: "maintainer-triggered events in a registered repository; only event_name is checked, not ref, workflow file, actor, environment or SHA", tier: security-critical, false_friend: false, provenance: {kind: documented, source: "DESIGN.md §3.1.1 step 6 lists the one check"}}
+  - {id: D-JENKINS-JOB, components: [auth], conditions: "registered Jenkins instances; any job that can bind the id-token credential; sub is not checked", tier: security-critical, false_friend: false, provenance: {kind: documented, source: "DESIGN.md §7.2 No additional claims required; §3.1.1 Jenkins: no additional checks"}}
+  - {id: D-ISSUER-TRUST-ROOT, components: [auth], conditions: "the compromised issuer's own workloads only; cross-issuer substitution is covered by P-ISSUER-PIN", tier: security-critical, false_friend: false, provenance: {kind: documented, source: "DESIGN.md §2.2 items 1–2"}}
+  - {id: D-INBOUND-TLS, components: [auth, upload-relay, ops-endpoints], conditions: "a deployment that exposes port 8000 without the proxy owns the exposure", tier: security-critical, false_friend: false, provenance: {kind: documented, source: "DESIGN.md §8.1; Dockerfile CMD"}}
+  - {id: D-METRICS-AUTH, components: [ops-endpoints], conditions: "the ingress keeps /metrics private; exposes EF project ids, product names, upload counts and version", tier: correctness-only, false_friend: false, provenance: {kind: documented, source: "DESIGN.md §4.1 served on the application port and unauthenticated"}}
+  - {id: D-DT-RESPONSE, components: [upload-relay], conditions: "non-2xx answers from DependencyTrack are relayed verbatim", tier: correctness-only, false_friend: false, provenance: {kind: documented, source: "DESIGN.md §4.1 verbatim"}}
+  - {id: D-EXTERNAL-ATOMICITY, components: [upload-relay, operator-tooling], conditions: "a 500 after a 2xx from DependencyTrack means the SBOM was likely stored; create-dt-projects may stop halfway, re-run is idempotent", tier: correctness-only, false_friend: false, provenance: {kind: documented, source: "pia/main.py upload_sbom comment a retry is NOT safe; pia/cli.py create_dt_projects help"}}
+  - {id: D-ATTESTATION, components: [upload-relay], conditions: "DependencyTrack receives the SBOM under PIA's key with no record of which workload sent it; an authenticated upload is not an attested SBOM", tier: correctness-only, false_friend: true, provenance: {kind: documented, source: "DESIGN.md §3.1 step 6 lists every field sent to DependencyTrack"}}
+  - {id: D-LIVEZ-STATIC, components: [ops-endpoints], conditions: "/livez returns a constant and does not check the database", tier: correctness-only, false_friend: false, provenance: {kind: documented, source: "pia/main.py livez docstring; issue #96"}}
+  - {id: D-ISSUER-ENUMERATION, components: [auth], conditions: "Jenkins issuer URLs only; the 401 reason reveals whether an issuer is registered before any signature check; accepted because the information is not sensitive", tier: correctness-only, false_friend: false, provenance: {kind: maintainer, date: "2026-07"}}
+  - {id: D-DB-TRANSPORT, components: [auth, upload-relay, ops-endpoints, operator-tooling], conditions: "a deliberate limit confirmed by the maintainers; PIA passes PIA_DATABASE_URL through unchanged; TLS is whatever the URL says", tier: security-critical, false_friend: false, provenance: {kind: maintainer, date: "2026-11"}}
+  - {id: D-CLI-BOUNDS, components: [operator-tooling], conditions: "absence-based; interactive operator use; GitHub and DependencyTrack calls in pia sync have no timeout; concurrent runs are not serialized", tier: correctness-only, false_friend: false, provenance: {kind: documented, source: "DESIGN.md §5.5 makes no such statement"}}
+
+downstream_responsibilities:
+  - {id: proxy-in-front, component: auth, statement: "keep a reverse proxy in front that terminates TLS, rate-limits, and caps the request body", enforces: [D-RATE-LIMIT, D-INBOUND-TLS, proxy-body-cap], provenance: {kind: documented, source: "DESIGN.md §8.1; issue #111"}}
+  - {id: private-metrics, component: ops-endpoints, statement: "do not route /metrics publicly", enforces: [D-METRICS-AUTH, metrics-private], provenance: {kind: documented, source: "DESIGN.md §4.1"}}
+  - {id: https-dependencytrack-url, component: upload-relay, statement: "use an https:// DependencyTrack URL in production", enforces: [P-OUTBOUND-TLS], provenance: {kind: maintainer, date: "2026-11"}}
+  - {id: database-transport-tls, component: operator-tooling, statement: "use a database URL with TLS where the network is not trusted", enforces: [D-DB-TRANSPORT], provenance: {kind: maintainer, date: "2026-11"}}
+  - {id: scope-dependencytrack-api-key, component: upload-relay, statement: "scope the DependencyTrack API key to what each caller needs and rotate it", enforces: [protect-operator-secrets], provenance: {kind: documented, source: "pia/cli.py module docstring"}}
+  - {id: separate-migration-credentials, component: operator-tooling, statement: "run migrations as a separate job with migration credentials; give the app a read-only database user", enforces: [run-migrations-out-of-band], provenance: {kind: documented, source: "README Database Migration"}}
+  - {id: curate-the-file, component: operator-tooling, statement: "treat the curated file as the authorization policy: review every plan with --dry-run first, keep repository URLs canonical and each repository under exactly one EF project, re-sync after a DependencyTrack rename", enforces: [curate-authorization-file, P-SYNC-ATOMIC], provenance: {kind: documented, source: "DESIGN.md §5.5; issue #107; issue #87"}}
+  - {id: audience-per-deployment, component: auth, statement: "set PIA_EXPECTED_AUDIENCE to a deployment-unique value and configure every issuer's token request with it", enforces: [P-SIG], provenance: {kind: documented, source: "DESIGN.md §7.1–§7.2"}}
+  - {id: restrict-jenkins-jobs, component: auth, statement: "register a Jenkins instance only if everyone who can define jobs on it may publish for that EF project", enforces: [D-JENKINS-JOB], provenance: {kind: documented, source: "DESIGN.md §7.2 Set GLOBAL scope"}}
+  - {id: clean-pod-environment, component: auth, statement: "keep the pod environment free of proxy, CA-bundle and .netrc settings you do not intend requests to honour", enforces: [P-ISSUER-PIN], provenance: {kind: maintainer, date: "2026-11"}}
+  - {id: single-worker, component: ops-endpoints, statement: "run one uvicorn worker per container; scale by pods", enforces: [P-METRIC-CARD], provenance: {kind: documented, source: "DESIGN.md §5.4"}}
+  - {id: trusted-workflow-code, component: auth, statement: "keep workflows on push, workflow_dispatch, release or schedule free of untrusted code", enforces: [D-EVENT-SEMANTICS], provenance: {kind: documented, source: "pia/models.py GITHUB_ALLOWED_EVENT_NAMES docstring"}}
+  - {id: token-handling, component: auth, statement: "treat the ID token as a credential for its lifetime; do not print it; expect no replay protection", enforces: [D-REPLAY], provenance: {kind: documented, source: "DESIGN.md §10 Protect against replayed tokens"}}
+  - {id: poll-dont-retry, component: upload-relay, statement: "poll the returned polling_url; a 200 means accepted, not processed; do not retry a 500 blindly", enforces: [D-EXTERNAL-ATOMICITY, polling-url-reachable], provenance: {kind: documented, source: "DESIGN.md §4.1; pia/main.py upload_sbom comment"}}
+  - {id: dependencytrack-validates-sbom, component: upload-relay, statement: "DependencyTrack validates the SBOM; PIA forwards whatever the workload sent", enforces: [validate-sbom-at-dt, sbom-well-formed], provenance: {kind: documented, source: "DESIGN.md §3.1 step 6"}}
+
+known_misuses:
+  - {id: allowlisted-event-untrusted-code, components: [auth], pattern: "a workflow_dispatch or push workflow checks out and runs pull-request code, giving it a token PIA accepts", safer_alternative: "keep publishing workflows free of untrusted inputs", provenance: {kind: documented, source: "pia/models.py GITHUB_ALLOWED_EVENT_NAMES docstring"}}
+  - {id: name-based-repository-identity, components: [auth], pattern: "a deleted or renamed repository's name is re-created under the same owner and inherits the registration", safer_alternative: "treat repo deletion or rename as a pia sync event; repository_id matching is planned as hardening", provenance: {kind: maintainer, date: "2026-10"}}
+  - {id: case-variant-duplicate-registrations, components: [operator-tooling], pattern: "two spellings of one repository registered under two EF projects", safer_alternative: "keep URLs canonical", provenance: {kind: maintainer, date: "2026-10"}}
+  - {id: pod-exposed-without-proxy, components: [auth, upload-relay, ops-endpoints], pattern: "exposing port 8000 directly: plain HTTP, no rate limit, no body cap", safer_alternative: "deploy behind the reverse proxy per §1.13", provenance: {kind: documented, source: "DESIGN.md §8.1"}}
+  - {id: over-privileged-dependencytrack-key, components: [upload-relay], pattern: "treating the DependencyTrack API key as per-project; a portfolio-management key in the app pod", safer_alternative: "scope the key per caller", provenance: {kind: documented, source: "pia/cli.py module docstring"}}
+  - {id: retrying-a-500, components: [upload-relay], pattern: "retrying an upload after a 500 when the SBOM may already be stored", safer_alternative: "poll DependencyTrack for the version before re-sending", provenance: {kind: documented, source: "pia/main.py upload_sbom comment"}}
+  - {id: multiple-uvicorn-workers, components: [ops-endpoints], pattern: "running uvicorn with --workers so metrics become per-worker and wrong", safer_alternative: "scale by pods", provenance: {kind: documented, source: "DESIGN.md §5.4"}}
+
+known_non_findings:
+  - {id: KNF-UNVERIFIED-DECODE, symptom: integrity-bypass, components: [auth], tool_pattern: "JWT decoded with verify_signature=False in pia/main.py authenticate", conditions: "the unverified claims are used only to select the issuer allowlist row; every authorization decision uses the claims returned by the verifying decode", discharged_by: [P-SIG], provenance: {kind: documented, source: "pia/main.py authenticate comment Pre-verification check"}}
+  - {id: KNF-RATE-LIMIT, symptom: x-volumetric-dos, components: [auth, upload-relay, ops-endpoints], tool_pattern: "no rate limiting on /v1/upload/sbom; each request triggers outbound fetches", conditions: "the report shows only request volume, not a per-request bound being exceeded", discharged_by: [D-RATE-LIMIT], provenance: {kind: documented, source: "DESIGN.md §8.1"}}
+  - {id: KNF-SLOW-ISSUER, symptom: x-worker-exhaustion, components: [auth], tool_pattern: "slow or trickling issuer holds a worker beyond 10 s", conditions: "the slow party is a registered issuer, and the event loop and /livez keep serving", discharged_by: [D-SLOW-RETRIEVAL], provenance: {kind: documented, source: "PR #112 description Known limitation (accepted risk)"}}
+  - {id: KNF-METRIC-LABELS, symptom: unbounded-allocation, components: [ops-endpoints], tool_pattern: "request method or path used as a Prometheus label", conditions: "the value passes through method_label, the route template, a Literal, or a database row before labeling", discharged_by: [P-METRIC-CARD], provenance: {kind: documented, source: "DESIGN.md §5.4 Label cardinality"}}
+  - {id: KNF-REPLAY, symptom: x-token-replay, components: [auth], tool_pattern: "a valid token can be reused within its lifetime", conditions: "the replayed token is unexpired and the report shows no acceptance past exp", discharged_by: [D-REPLAY], provenance: {kind: documented, source: "DESIGN.md §10 Protect against replayed tokens"}}
+
+dispositions:
+  - VALID
+  - VALID-HARDENING
+  - "OUT-OF-MODEL: trusted-input"
+  - "OUT-OF-MODEL: adversary-not-in-scope"
+  - "OUT-OF-MODEL: unsupported-component"
+  - "OUT-OF-MODEL: non-default-build"
+  - "OUT-OF-MODEL: dependency-contract"
+  - "BY-DESIGN: property-disclaimed"
+  - KNOWN-NON-FINDING
+  - MODEL-GAP
+
+disposition_precedence:
+  - KNOWN-NON-FINDING
+  - "OUT-OF-MODEL: unsupported-component"
+  - "OUT-OF-MODEL: non-default-build"
+  - "OUT-OF-MODEL: dependency-contract"
+  - "OUT-OF-MODEL: trusted-input"
+  - "OUT-OF-MODEL: adversary-not-in-scope"
+  - "BY-DESIGN: property-disclaimed"
+  - VALID
+  - VALID-HARDENING
+  - MODEL-GAP
