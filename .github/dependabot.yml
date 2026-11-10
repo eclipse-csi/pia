@@ -29,6 +29,14 @@ updates:
     cooldown:
       default-days: 7
     open-pull-requests-limit: 10
+    ignore:
+      # Python minor bumps must move .python-version along (enforced in CI)
+      # and wait for wheels of compiled deps (e.g. psycopg2-binary), so they
+      # are done by hand; patch bumps stay automatic.
+      - dependency-name: "python"
+        update-types:
+          - "version-update:semver-major"
+          - "version-update:semver-minor"
 
   - package-ecosystem: "github-actions"
     directory: "/"
