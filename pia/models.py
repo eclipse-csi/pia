@@ -353,7 +353,7 @@ def find_workload_by_claims(
         # when a fork's MR pipeline runs in the parent project, while
         # `job_project_*` and `ci_config_ref_uri` name the parent. Matching
         # the source project is what keeps a fork from publishing as the
-        # parent.
+        # parent (see threat-model.md, P-WORKLOAD-BIND).
         project_path = token_claims.get("project_path")
         project_id = token_claims.get("project_id")
         if not isinstance(project_path, str) or not isinstance(project_id, str):

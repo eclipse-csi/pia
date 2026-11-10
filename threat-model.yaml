@@ -1,14 +1,14 @@
 # threat-model.yaml — derived index; the prose threat model is canonical.
 schema: threat-model-sidecar/v2
 project: pia
-prose_version: "threat-model.md@sha256:f99bf6048cce6119e63bc2720edd435d5722091813dc31da13e9bd4fb92e8c37"
+prose_version: "threat-model.md@sha256:ae10f8b6519c9c8e71b8273f593f8a8b6f53050abad3d47e7f35789a98d68f35"
 model_status: accepted
 triage_policy: strict
-confidence: {documented: 166, maintainer: 26, inferred: 0, assumption: 0}
+confidence: {documented: 176, maintainer: 39, inferred: 0, assumption: 0}
 
 generation:
-  model: "Claude Fable 5.1 (claude-fable-5-1)"
-  effort: medium
+  model: "Claude Fable 5.1 (claude-fable-5-1); GitLab revision 2026-11-10: Claude Opus 5.5 (claude-opus-5-5)"
+  effort: "medium; GitLab revision: low"
   plugins:
     - threat-model
     - threat-model-recon
@@ -33,7 +33,7 @@ components:
     provenance: {kind: documented, source: "DESIGN.md §5.4 Label cardinality"}
   - name: operator-tooling
     scope: in
-    reachability_precondition: "reachable from the curated file, the PIA_* environment, or a GitHub / DependencyTrack API response; all operator trust"
+    reachability_precondition: "reachable from the curated file, the PIA_* environment, or a GitHub, Eclipse GitLab or DependencyTrack API response; all operator trust"
     provenance: {kind: documented, source: "DESIGN.md §5.5 human-curated file"}
   - name: dev-bootstrap-script
     scope: out
@@ -53,7 +53,7 @@ host_side_effects:
   - {effect: signal-handlers, stance: absent, components: [auth, upload-relay, ops-endpoints, operator-tooling], conditions: "scan of pia/*.py and alembic/env.py at this version", provenance: {kind: maintainer, date: "2026-11"}}
   - {effect: filesystem, stance: conditional, components: [operator-tooling], conditions: "only pia sync / create-dt-projects read the curated file; nothing writes files", provenance: {kind: maintainer, date: "2026-11"}}
   - {effect: environment-reads, stance: conditional, components: [auth, upload-relay, ops-endpoints, operator-tooling], conditions: "PIA's own code reads only PIA_* variables; requests additionally honours proxy, CA-bundle and .netrc settings on PIA's behalf; the production image ships none", provenance: {kind: maintainer, date: "2026-11"}}
-  - {effect: network-sockets, stance: present, components: [auth, upload-relay, operator-tooling], conditions: "HTTPS to the allowlisted issuer, the configured DependencyTrack URL, api.github.com (CLI only), and PostgreSQL", provenance: {kind: maintainer, date: "2026-11"}}
+  - {effect: network-sockets, stance: present, components: [auth, upload-relay, operator-tooling], conditions: "HTTPS to the allowlisted issuer (GitHub, Eclipse GitLab or a registered Jenkins), the configured DependencyTrack URL, api.github.com and the gitlab.eclipse.org REST API (CLI only; GitLab anonymous; per-read timeouts), and PostgreSQL", provenance: {kind: maintainer, date: "2026-11"}}
   - {effect: global-state, stance: present, components: [auth, upload-relay, ops-endpoints], conditions: "import time in pia/main.py: logging record factory and basicConfig, Settings() load, Prometheus default registry", provenance: {kind: maintainer, date: "2026-11"}}
 
 entry_points:
@@ -80,6 +80,11 @@ entry_points:
         control_kinds: [data]
         caller_must_enforce: "none — P-SIG, P-WORKLOAD-BIND"
         provenance: {kind: documented, source: "DESIGN.md §3.1.1 steps 5–6"}
+      - name: verified GitLab claims (project_path, project_id, pipeline_source)
+        attacker_controllable: true
+        control_kinds: [data]
+        caller_must_enforce: "none — P-SIG, P-WORKLOAD-BIND"
+        provenance: {kind: maintainer, date: "2026-11"}
       - name: Content-Type, malformed or non-UTF-8 body
         attacker_controllable: true
         control_kinds: [data, type-class]
@@ -159,11 +164,11 @@ entry_points:
         obligation_id: protect-operator-secrets
         caller_must_enforce: "keep secrets out of logs and shell history"
         provenance: {kind: documented, source: "pia/cli.py module docstring"}
-      - name: GitHub and DependencyTrack API responses
+      - name: GitHub, Eclipse GitLab and DependencyTrack API responses
         attacker_controllable: false
         control_kinds: [data]
-        caller_must_enforce: "none — trusted collaborator output (§1.10)"
-        provenance: {kind: documented, source: "pia/sync.py build_desired docstring"}
+        caller_must_enforce: "none — trusted collaborator output (§1.10); a non-canonical GitLab path or a GitLab 404 (missing, private or internal project) aborts the sync"
+        provenance: {kind: documented, source: "pia/sync.py build_desired and fetch_gitlab_project_id docstrings"}
   - id: "pia create-dt-projects FILE"
     component: operator-tooling
     parameters:
@@ -212,7 +217,7 @@ contract_dimensions:
   - {component: upload-relay, dimension: recursive-cyclic-topology, status: not-applicable, conditions: "the body schema is four flat fields; the SBOM is an opaque string", provenance: {kind: documented, source: "DESIGN.md §4.1 request body"}}
   - {component: upload-relay, dimension: callback-execution, status: disclaimed, conditions: "DependencyTrack's response is relayed verbatim; PIA does not sanitize it", property_id: D-DT-RESPONSE, provenance: {kind: documented, source: "DESIGN.md §4.1 verbatim"}}
   - {component: upload-relay, dimension: serialization-reconstruction, status: claimed, conditions: "the SBOM is never decoded or parsed by PIA", property_id: P-SBOM-OPAQUE, provenance: {kind: documented, source: "DESIGN.md §3.1 step 3"}}
-  - {component: upload-relay, dimension: reference-lifecycle, status: claimed, conditions: "the target project is resolved per request from the database; a pia sync change applies to the next request", property_id: P-WORKLOAD-BIND, provenance: {kind: documented, source: "DESIGN.md §3.1 step 5"}}
+  - {component: upload-relay, dimension: reference-lifecycle, status: claimed, conditions: "the target project is resolved per request from the database; a pia sync change applies to the next request; a GitLab workload matches only the project_id recorded at sync, so a project re-created at a registered path is rejected until re-synced", property_id: P-WORKLOAD-BIND, provenance: {kind: documented, source: "DESIGN.md §3.1 step 5; pia/models.py GitLabWorkload docstring resurrection guard"}}
   - {component: upload-relay, dimension: concurrency-reentrancy, status: claimed, conditions: "the DependencyTrack call has connect/read timeouts and runs in the threadpool", property_id: P-NO-STALL, provenance: {kind: documented, source: "pia/dependencytrack.py TIMEOUT docstring"}}
   - {component: upload-relay, dimension: resource-complexity, status: disclaimed, conditions: "the whole body, its parse, and the base64 string sit in memory at once", property_id: D-SBOM-VALIDATION, provenance: {kind: documented, source: "issue #111 Memory in PIA"}}
   - {component: ops-endpoints, dimension: numeric-domain, status: claimed, conditions: "every label value comes from a fixed set, a route template, or a database row", property_id: P-METRIC-CARD, provenance: {kind: documented, source: "DESIGN.md §5.4 Label cardinality"}}
@@ -226,11 +231,11 @@ contract_dimensions:
   - {component: operator-tooling, dimension: numeric-domain, status: disclaimed, conditions: "no limits on file size, project count, or API response size", property_id: D-CLI-BOUNDS, provenance: {kind: documented, source: "DESIGN.md §5.5 states no limits"}}
   - {component: operator-tooling, dimension: failure-atomicity, status: claimed, conditions: "pia sync applies its plan in one transaction and commits at the end; create-dt-projects is idempotent but not atomic (D-EXTERNAL-ATOMICITY)", property_id: P-SYNC-ATOMIC, provenance: {kind: documented, source: "pia/sync.py apply_plan docstring; pia/cli.py create_dt_projects help Idempotent"}}
   - {component: operator-tooling, dimension: recursive-cyclic-topology, status: not-applicable, conditions: "the file schema is two levels deep with extra=forbid", provenance: {kind: documented, source: "pia/sync.py module docstring file example"}}
-  - {component: operator-tooling, dimension: callback-execution, status: not-applicable, conditions: "GitHub and DependencyTrack are trusted collaborators whose answers are taken as true (§1.10)", provenance: {kind: documented, source: "pia/sync.py build_desired docstring"}}
+  - {component: operator-tooling, dimension: callback-execution, status: not-applicable, conditions: "GitHub, Eclipse GitLab and DependencyTrack are trusted collaborators whose answers are taken as true (§1.10)", provenance: {kind: documented, source: "pia/sync.py build_desired docstring"}}
   - {component: operator-tooling, dimension: serialization-reconstruction, status: not-applicable, conditions: "the file is operator-trusted and loaded with yaml.safe_load, which constructs no arbitrary objects", provenance: {kind: documented, source: "DESIGN.md §5.5 curated"}}
   - {component: operator-tooling, dimension: reference-lifecycle, status: claimed, conditions: "rows are keyed by their business columns; a changed row is a delete plus a create", property_id: P-SYNC-ATOMIC, provenance: {kind: documented, source: "pia/sync.py compute_plan docstring"}}
   - {component: operator-tooling, dimension: concurrency-reentrancy, status: disclaimed, conditions: "no lock between concurrent pia sync runs", property_id: D-CLI-BOUNDS, provenance: {kind: documented, source: "DESIGN.md §5.5 makes no concurrency statement"}}
-  - {component: operator-tooling, dimension: resource-complexity, status: disclaimed, conditions: "GitHub and DependencyTrack calls carry no timeout; interactive use", property_id: D-CLI-BOUNDS, provenance: {kind: documented, source: "DESIGN.md §5.5 makes no resource statement"}}
+  - {component: operator-tooling, dimension: resource-complexity, status: disclaimed, conditions: "GitHub, Eclipse GitLab and DependencyTrack calls have 5 s connect and 30 s per-read timeouts but no total deadline; interactive use", property_id: D-CLI-BOUNDS, provenance: {kind: documented, source: "pia/sync.py TIMEOUT docstring not the total request time"}}
 
 outputs:
   - component: upload-relay
@@ -348,6 +353,12 @@ adversaries:
     excluded_capabilities: [cause-push-workflow_dispatch-release-schedule-run, author-workflow-file]
     goals: [publish-sbom-as-project]
     provenance: {kind: documented, source: "pia/models.py GITHUB_ALLOWED_EVENT_NAMES docstring"}
+  - name: gitlab-non-committer
+    scope: in
+    capabilities: [run-pipelines-in-own-projects-and-forks, mint-eclipse-gitlab-token-for-own-project, cause-merge_request_event-external_pull_request_event-trigger-pipeline]
+    excluded_capabilities: [cause-push-web-schedule-pipeline-in-registered-project, obtain-token-naming-registered-project-from-fork]
+    goals: [publish-sbom-as-project]
+    provenance: {kind: maintainer, date: "2026-11"}
   - name: registered-workload
     scope: in
     capabilities: [hold-valid-token-for-own-identity, choose-product-name-version-latest-bom, replay-token-until-exp]
@@ -362,8 +373,8 @@ adversaries:
     provenance: {kind: documented, source: "PR #113 description one project's Jenkins instance cannot point PIA at another project's keys; PR #112 description Known limitation (accepted risk)"}
   - name: project-insider
     scope: out
-    capabilities: [create-repositories-under-registered-owner, recreate-deleted-or-renamed-repository, trigger-allowlisted-publish-events]
-    excluded_capabilities: []
+    capabilities: [create-repositories-under-registered-owner, recreate-deleted-or-renamed-repository, push-run-schedule-or-include-ci-in-registered-gitlab-project, trigger-allowlisted-publish-events]
+    excluded_capabilities: [have-recreated-gitlab-project-accepted-at-registered-path]
     goals: []
     provenance: {kind: maintainer, date: "2026-10"}
   - name: operator
@@ -569,17 +580,17 @@ build_flags:
 
 properties_claimed:
   - {id: P-SIG, kind: authentication, components: [auth], tier: security-critical, conditions: "RS256 only; key fetched per request from the allowlisted issuer's JWKS, kid match, use sig or absent; aud equals PIA_EXPECTED_AUDIENCE; exp unexpired; iat present", violation_symptoms: [integrity-bypass], provenance: {kind: documented, source: "DESIGN.md §3.1.1 steps 3–4"}}
-  - {id: P-ISSUER-PIN, kind: x-outbound-confinement, components: [auth], tier: security-critical, conditions: "iss equals the GitHub issuer or a registered Jenkins issuer; jwks_uri under {iss}/ with unreserved characters and no dot segments; no redirects; HTTP 200 only", violation_symptoms: [x-outbound-request-to-unlisted-host], provenance: {kind: documented, source: "DESIGN.md §3.1.1 steps 2–3; CHANGELOG 0.6.0 #84 and 0.9.0 #113"}}
+  - {id: P-ISSUER-PIN, kind: x-outbound-confinement, components: [auth], tier: security-critical, conditions: "iss equals the GitHub issuer, the Eclipse GitLab issuer, or a registered Jenkins issuer; jwks_uri under {iss}/ with unreserved characters and no dot segments; no redirects; HTTP 200 only", violation_symptoms: [x-outbound-request-to-unlisted-host], provenance: {kind: documented, source: "DESIGN.md §3.1.1 steps 2–3; CHANGELOG 0.6.0 #84 and 0.9.0 #113"}}
   - {id: P-ISSUER-BOUND, kind: resource-bound, components: [auth], tier: security-critical, conditions: "each discovery and JWKS response: 10 s per read, 1 MiB decoded cap, 10 s deadline checked between reads; total wall time is not bounded (D-SLOW-RETRIEVAL)", violation_symptoms: [unbounded-allocation], provenance: {kind: documented, source: "DESIGN.md §3.1.1 step 3"}}
-  - {id: P-WORKLOAD-BIND, kind: integrity, components: [auth, upload-relay], tier: security-critical, conditions: "verified claims match exactly one registered workload; GitHub event_name in {push, workflow_dispatch, release, schedule}; product_name resolved only within the workload's ef_project_id; registrations are operator input", violation_symptoms: [integrity-bypass], provenance: {kind: documented, source: "README authorization note; DESIGN.md §3.1.1 steps 5–6 and §4.3"}}
+  - {id: P-WORKLOAD-BIND, kind: integrity, components: [auth, upload-relay], tier: security-critical, conditions: "verified claims match exactly one registered workload; GitHub event_name in {push, workflow_dispatch, release, schedule}; GitLab matched on project_path and project_id (never job_project_*), so fork MR pipelines never match and a project re-created at a registered path is rejected until re-synced, against insiders too (maintainer 2026-11); GitLab pipeline_source in {push, web, schedule}; product_name resolved only within the workload's ef_project_id; registrations are operator input", violation_symptoms: [integrity-bypass], provenance: {kind: documented, source: "README authorization note; DESIGN.md §3.1.1 steps 5–6 and §4.3; pia/models.py find_workload_by_claims comment, GITLAB_ALLOWED_PIPELINE_SOURCES and GitLabWorkload docstrings"}}
   - {id: P-NO-STALL, kind: availability, components: [auth, upload-relay, ops-endpoints], tier: security-critical, conditions: "fewer than about 40 concurrent slow requests; DependencyTrack call has 5 s connect and 30 s read timeouts", violation_symptoms: [hang], provenance: {kind: documented, source: "CHANGELOG 0.9.0 #112; PR #112 description"}}
   - {id: P-LOG-ESCAPE, kind: output-sanitization, components: [auth, ops-endpoints], tier: security-critical, conditions: "values logged before the signature check passes (unverified iss, decode and verification errors) are escaped with !a; request ID server-generated; token and API key never logged", violation_symptoms: [x-log-forgery, info-leak], provenance: {kind: documented, source: "CHANGELOG 0.3.0 #60"}}
   - {id: P-LOG-ESCAPE-AUTHED, kind: output-sanitization, components: [auth, upload-relay], tier: correctness-only, conditions: "values logged after a token verified for a registered workload (claims summary, product_name, product_version, DependencyTrack body) are escaped with !a; the fixed line text names the caller's real ef_project_id", violation_symptoms: [x-log-forgery], provenance: {kind: maintainer, date: "2026-10"}}
   - {id: P-ERRORS, kind: correctness, components: [auth, upload-relay], tier: correctness-only, conditions: "malformed POST data yields 422 without echoing the body; token problems yield 401; DependencyTrack failure yields 502 or the relayed status; an unhandled 500 on malformed unauthenticated input is a bug, not a vulnerability (maintainer ruling 2026-10)", violation_symptoms: [crash], provenance: {kind: documented, source: "DESIGN.md §5.3; CHANGELOG 0.9.0 #109, #110"}}
   - {id: P-METRIC-CARD, kind: resource-bound, components: [ops-endpoints], tier: security-critical, conditions: "method collapses to a fixed set, path is the route template or <unmatched>, reason/outcome are Literal, product_name labeled only after resolving to a database row", violation_symptoms: [unbounded-allocation], provenance: {kind: documented, source: "DESIGN.md §5.4 Label cardinality"}}
-  - {id: P-OUTBOUND-TLS, kind: confidentiality, components: [auth, upload-relay, operator-tooling], tier: security-critical, conditions: "issuer URLs are HTTPS by construction; requests verifies certificates by default; DependencyTrack URL is https (an http URL is dev-only, §1.6)", violation_symptoms: [info-leak], provenance: {kind: maintainer, date: "2026-11"}}
+  - {id: P-OUTBOUND-TLS, kind: confidentiality, components: [auth, upload-relay, operator-tooling], tier: security-critical, conditions: "issuer URLs and the CLI's GitHub and GitLab API URLs are HTTPS by construction; requests verifies certificates by default; DependencyTrack URL is https (an http URL is dev-only, §1.6)", violation_symptoms: [info-leak], provenance: {kind: maintainer, date: "2026-11"}}
   - {id: P-SBOM-OPAQUE, kind: correctness, components: [upload-relay], tier: correctness-only, conditions: "bom relayed byte-identical and never decoded", violation_symptoms: [wrong-output], provenance: {kind: documented, source: "DESIGN.md §3.1 step 3"}}
-  - {id: P-SYNC-ATOMIC, kind: correctness, components: [operator-tooling], tier: correctness-only, conditions: "pia sync prints its plan, refuses deletions/updates without --allow-db-updates-and-deletions, applies in one transaction, commits once; validator rejects duplicate ids, workload URLs and DependencyTrack names", violation_symptoms: [x-partial-authorization-state], provenance: {kind: documented, source: "pia/cli.py sync help; DESIGN.md §5.5"}}
+  - {id: P-SYNC-ATOMIC, kind: correctness, components: [operator-tooling], tier: correctness-only, conditions: "pia sync prints its plan, refuses deletions/updates without --allow-db-updates-and-deletions, applies in one transaction, commits once; validator rejects duplicate ids, workload URLs and DependencyTrack names; a non-canonical GitLab project path aborts the sync", violation_symptoms: [x-partial-authorization-state], provenance: {kind: documented, source: "pia/cli.py sync help; DESIGN.md §5.5"}}
 
 properties_disclaimed:
   - {id: D-REPLAY, components: [auth], conditions: "within the token's lifetime; no jti tracking; stated limit, not silence", tier: security-critical, false_friend: false, provenance: {kind: documented, source: "issue #9; DESIGN.md §10 Protect against replayed tokens"}}
@@ -587,9 +598,9 @@ properties_disclaimed:
   - {id: D-RATE-LIMIT, components: [auth, upload-relay, ops-endpoints], conditions: "the reverse proxy owns rate limiting; every unauthenticated request may cost two outbound fetches and a database query", tier: security-critical, false_friend: false, provenance: {kind: documented, source: "DESIGN.md §8.1 Reverse proxy for TLS termination and rate limiting; §8.3 Rate limiting per project/IP at reverse proxy level"}}
   - {id: D-SBOM-VALIDATION, components: [upload-relay], conditions: "authenticated workloads; PIA neither parses the SBOM nor bounds the body; DependencyTrack and the proxy do", tier: security-critical, false_friend: false, provenance: {kind: documented, source: "DESIGN.md §3.1 step 3; issue #111"}}
   - {id: D-PRODUCT-LEAST-PRIV, components: [auth, upload-relay], conditions: "within one EF project; any registered workload may publish to every product of that EF project", tier: security-critical, false_friend: false, provenance: {kind: documented, source: "README authorization note; issue #39 decision Option A"}}
-  - {id: D-EVENT-SEMANTICS, components: [auth], conditions: "maintainer-triggered events in a registered repository; only event_name is checked, not ref, workflow file, actor, environment or SHA", tier: security-critical, false_friend: false, provenance: {kind: documented, source: "DESIGN.md §3.1.1 step 6 lists the one check"}}
+  - {id: D-EVENT-SEMANTICS, components: [auth], conditions: "maintainer-triggered events in a registered repository: only event_name is checked, not ref, workflow file, actor, environment or SHA; committer-caused pipelines in a registered GitLab project: only pipeline_source is checked, not ref, ref_protected, environment, ci_config_ref_uri, sub or the requesting job, and jobs from included CI files may publish", tier: security-critical, false_friend: false, provenance: {kind: documented, source: "DESIGN.md §3.1.1 step 6 lists the one check; pia/main.py LOGGED_CLAIMS docstring"}}
   - {id: D-JENKINS-JOB, components: [auth], conditions: "registered Jenkins instances; any job that can bind the id-token credential; sub is not checked", tier: security-critical, false_friend: false, provenance: {kind: documented, source: "DESIGN.md §7.2 No additional claims required; §3.1.1 Jenkins: no additional checks"}}
-  - {id: D-ISSUER-TRUST-ROOT, components: [auth], conditions: "the compromised issuer's own workloads only; cross-issuer substitution is covered by P-ISSUER-PIN", tier: security-critical, false_friend: false, provenance: {kind: documented, source: "DESIGN.md §2.2 items 1–2"}}
+  - {id: D-ISSUER-TRUST-ROOT, components: [auth], conditions: "the compromised or faulty issuer's own workloads only, including signed claims that contradict the issuer's own documentation (e.g. GitLab naming the parent in a fork MR token, maintainer 2026-11); cross-issuer substitution is covered by P-ISSUER-PIN; PIA matching a claim its issuer documents differently is VALID against P-WORKLOAD-BIND", tier: security-critical, false_friend: false, provenance: {kind: documented, source: "DESIGN.md §2.2 items 1–2"}}
   - {id: D-INBOUND-TLS, components: [auth, upload-relay, ops-endpoints], conditions: "a deployment that exposes port 8000 without the proxy owns the exposure", tier: security-critical, false_friend: false, provenance: {kind: documented, source: "DESIGN.md §8.1; Dockerfile CMD"}}
   - {id: D-METRICS-AUTH, components: [ops-endpoints], conditions: "the ingress keeps /metrics private; exposes EF project ids, product names, upload counts and version", tier: correctness-only, false_friend: false, provenance: {kind: documented, source: "DESIGN.md §4.1 served on the application port and unauthenticated"}}
   - {id: D-DT-RESPONSE, components: [upload-relay], conditions: "non-2xx answers from DependencyTrack are relayed verbatim", tier: correctness-only, false_friend: false, provenance: {kind: documented, source: "DESIGN.md §4.1 verbatim"}}
@@ -598,7 +609,7 @@ properties_disclaimed:
   - {id: D-LIVEZ-STATIC, components: [ops-endpoints], conditions: "/livez returns a constant and does not check the database", tier: correctness-only, false_friend: false, provenance: {kind: documented, source: "pia/main.py livez docstring; issue #96"}}
   - {id: D-ISSUER-ENUMERATION, components: [auth], conditions: "Jenkins issuer URLs only; the 401 reason reveals whether an issuer is registered before any signature check; accepted because the information is not sensitive", tier: correctness-only, false_friend: false, provenance: {kind: maintainer, date: "2026-07"}}
   - {id: D-DB-TRANSPORT, components: [auth, upload-relay, ops-endpoints, operator-tooling], conditions: "a deliberate limit confirmed by the maintainers; PIA passes PIA_DATABASE_URL through unchanged; TLS is whatever the URL says", tier: security-critical, false_friend: false, provenance: {kind: maintainer, date: "2026-11"}}
-  - {id: D-CLI-BOUNDS, components: [operator-tooling], conditions: "absence-based; interactive operator use; GitHub and DependencyTrack calls in pia sync have no timeout; concurrent runs are not serialized", tier: correctness-only, false_friend: false, provenance: {kind: documented, source: "DESIGN.md §5.5 makes no such statement"}}
+  - {id: D-CLI-BOUNDS, components: [operator-tooling], conditions: "absence-based except the stated per-read timeout; interactive operator use; GitHub, Eclipse GitLab and DependencyTrack calls in pia sync have 5 s connect and 30 s per-read timeouts but no total deadline; concurrent runs are not serialized", tier: correctness-only, false_friend: false, provenance: {kind: documented, source: "DESIGN.md §5.5 makes no such statement; pia/sync.py TIMEOUT docstring"}}
 
 downstream_responsibilities:
   - {id: proxy-in-front, component: auth, statement: "keep a reverse proxy in front that terminates TLS, rate-limits, and caps the request body", enforces: [D-RATE-LIMIT, D-INBOUND-TLS, proxy-body-cap], provenance: {kind: documented, source: "DESIGN.md §8.1; issue #111"}}
@@ -608,11 +619,13 @@ downstream_responsibilities:
   - {id: scope-dependencytrack-api-key, component: upload-relay, statement: "scope the DependencyTrack API key to what each caller needs and rotate it", enforces: [protect-operator-secrets], provenance: {kind: documented, source: "pia/cli.py module docstring"}}
   - {id: separate-migration-credentials, component: operator-tooling, statement: "run migrations as a separate job with migration credentials; give the app a read-only database user", enforces: [run-migrations-out-of-band], provenance: {kind: documented, source: "README Database Migration"}}
   - {id: curate-the-file, component: operator-tooling, statement: "treat the curated file as the authorization policy: review every plan with --dry-run first, keep repository URLs canonical and each repository under exactly one EF project, re-sync after a DependencyTrack rename", enforces: [curate-authorization-file, P-SYNC-ATOMIC], provenance: {kind: documented, source: "DESIGN.md §5.5; issue #107; issue #87"}}
+  - {id: resync-gitlab-changes, component: operator-tooling, statement: "re-sync after a registered GitLab project is renamed, transferred, or deleted and re-created", enforces: [curate-authorization-file, P-WORKLOAD-BIND], provenance: {kind: documented, source: "pia/models.py GitLabWorkload docstring until it is re-synced"}}
   - {id: audience-per-deployment, component: auth, statement: "set PIA_EXPECTED_AUDIENCE to a deployment-unique value and configure every issuer's token request with it", enforces: [P-SIG], provenance: {kind: documented, source: "DESIGN.md §7.1–§7.2"}}
   - {id: restrict-jenkins-jobs, component: auth, statement: "register a Jenkins instance only if everyone who can define jobs on it may publish for that EF project", enforces: [D-JENKINS-JOB], provenance: {kind: documented, source: "DESIGN.md §7.2 Set GLOBAL scope"}}
   - {id: clean-pod-environment, component: auth, statement: "keep the pod environment free of proxy, CA-bundle and .netrc settings you do not intend requests to honour", enforces: [P-ISSUER-PIN], provenance: {kind: maintainer, date: "2026-11"}}
   - {id: single-worker, component: ops-endpoints, statement: "run one uvicorn worker per container; scale by pods", enforces: [P-METRIC-CARD], provenance: {kind: documented, source: "DESIGN.md §5.4"}}
   - {id: trusted-workflow-code, component: auth, statement: "keep workflows on push, workflow_dispatch, release or schedule free of untrusted code", enforces: [D-EVENT-SEMANTICS], provenance: {kind: documented, source: "pia/models.py GITHUB_ALLOWED_EVENT_NAMES docstring"}}
+  - {id: gitlab-pipeline-access-is-a-credential, component: auth, statement: "on Eclipse GitLab, treat Developer access to a registered project like a credential; keep the publishing job small, limit it to release refs with rules:, protect those refs, and consider a protected environment with required approvals", enforces: [D-EVENT-SEMANTICS], provenance: {kind: maintainer, date: "2026-11"}}
   - {id: token-handling, component: auth, statement: "treat the ID token as a credential for its lifetime; do not print it; expect no replay protection", enforces: [D-REPLAY], provenance: {kind: documented, source: "DESIGN.md §10 Protect against replayed tokens"}}
   - {id: poll-dont-retry, component: upload-relay, statement: "poll the returned polling_url; a 200 means accepted, not processed; do not retry a 500 blindly", enforces: [D-EXTERNAL-ATOMICITY, polling-url-reachable], provenance: {kind: documented, source: "DESIGN.md §4.1; pia/main.py upload_sbom comment"}}
   - {id: dependencytrack-validates-sbom, component: upload-relay, statement: "DependencyTrack validates the SBOM; PIA forwards whatever the workload sent", enforces: [validate-sbom-at-dt, sbom-well-formed], provenance: {kind: documented, source: "DESIGN.md §3.1 step 6"}}

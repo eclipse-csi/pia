@@ -4,21 +4,29 @@
 
 - **Project**: PIA, the Eclipse Foundation's OIDC authentication broker for
   SBOM uploads to DependencyTrack. Repository `eclipse-csi/pia`.
-- **Version binding**: release 0.9.0, modeled at commit `972572b` on `main`
-  (the two commits after the `v0.9.0` tag change CI configuration only). A
-  report against version *N* is triaged against the model as it stood at *N*,
-  not HEAD.
-- **Date / author**: 2026-11-09, drafted by the maintainer with AI assistance.
-- **Generation metadata**: Claude Fable 5.1 (`claude-fable-5-1`), medium
-  effort, driven by the `threat-model` plugin (orchestrator plus the recon,
-  surface, interview, authoring, backtest and sidecar skills), the GitHub REST
-  API for issue and advisory history, and the plugin's validator harness.
+- **Version binding**: the first release after 0.9.0, modeled at commit
+  `ddb26cc` ("Add Eclipse GitLab workload support", CHANGELOG
+  `[Unreleased]`). That commit adds Eclipse GitLab workloads; nothing else in
+  the service changed since 0.9.0. Reports against 0.9.0 are triaged against
+  the model as accepted for 0.9.0 (commit `972572b`), which lacks every GitLab
+  row. A report against version *N* is triaged against the model as it stood
+  at *N*, not HEAD.
+- **Date / author**: 2026-11-09, drafted by the maintainer with AI assistance;
+  revised 2026-11-10 for GitLab workloads.
+- **Generation metadata**: the 0.9.0 model was produced by Claude Fable 5.1
+  (`claude-fable-5-1`), medium effort, driven by the `threat-model` plugin
+  (orchestrator plus the recon, surface, interview, authoring, backtest and
+  sidecar skills), the GitHub REST API for issue and advisory history, and the
+  plugin's validator harness. The 2026-11-10 GitLab revision was produced by
+  Claude Opus 5.5 (`claude-opus-5-5`), low effort, with the same orchestrator
+  running the surface, interview, authoring, backtest and sidecar steps on the
+  GitLab change, and the same validator.
 - **Reporting cross-reference**: §1.11 (claimed-property) findings go to the
   repository's private vulnerability reporting (GitHub security advisories);
   §1.3 / §1.12 findings are closed by citing this document.
-- **Status**: accepted, 2026-11. Both question waves were answered by the
-  maintainers in 2026-11; every claim carries **documented** or **maintainer**
-  provenance. Should a later revision reintroduce unratified claims, a disposition that closes a report
+- **Status**: accepted, 2026-11. All three question waves (two for 0.9.0, one
+  for the GitLab revision) were answered by the maintainers in 2026-11; every
+  claim carries **documented** or **maintainer** provenance. Should a later revision reintroduce unratified claims, a disposition that closes a report
   against the reporter must be licensed by a **documented** or **maintainer**
   claim (§1.17); an **inferred** claim escalates instead, and an **assumption**
   closes only what the triage policy allows.
@@ -28,26 +36,30 @@
   source; *(maintainer, YYYY-MM)* = confirmed by a maintainer in answer to
   this process; *(assumption, QN)* = a conservative default pending question
   `QN`; *(inferred, QN)* = reasoned from code, open, question `QN`.
-- **Draft confidence**: 166 documented / 26 maintainer / 0 inferred / 0 assumption.
-- **Backtest note**: routed a 43-item corpus in 27 clusters over all four
+- **Draft confidence**: 176 documented / 39 maintainer / 0 inferred / 0 assumption.
+- **Backtest note**: routed a 55-item corpus in 32 clusters over all four
   in-scope components and all 8 contract dimensions; 22 items carry a real
   historical outcome (12 repository advisories, 5 published and 7 closed with
   a maintainer ruling, 3 of them duplicates; 5 fixes without an advisory; 5
-  maintainer statements on issues, pull requests or advisory threads), 21 are
-  synthesized. Dispositions: 17 `VALID` (3 correctness-only), 0
-  `VALID-HARDENING`, 12 `BY-DESIGN: property-disclaimed`, 5
-  `KNOWN-NON-FINDING`, 9 `OUT-OF-MODEL`, 0 `MODEL-GAP`. Fail-safe figure: all
-  15 historically-fixed items routed `VALID`. 26 of 43 close outright and
+  maintainer statements on issues, pull requests or advisory threads), 33 are
+  synthesized. The GitLab revision added 12 of the synthesized items in 5
+  clusters; the feature has no history yet. Dispositions: 23 `VALID` (5
+  correctness-only), 0 `VALID-HARDENING`, 16 `BY-DESIGN: property-disclaimed`,
+  5 `KNOWN-NON-FINDING`, 11 `OUT-OF-MODEL`, 0 `MODEL-GAP`. Fail-safe figure:
+  all 15 historically-fixed items routed `VALID`. 32 of 55 close outright and
   none escalate. Two routings were revised against closed-advisory rulings:
   post-authentication log injection is correctness-only (`P-LOG-ESCAPE`
   split by tier), and repository-name recycling routes
-  `OUT-OF-MODEL: adversary-not-in-scope` (project insider, §1.10).
+  `OUT-OF-MODEL: adversary-not-in-scope` (project insider, §1.10). Two GitLab
+  items needed maintainer rulings to route: a bypass of the `project_id` pin
+  is `VALID` even for an insider, and GitLab mis-signing its own claims is
+  the issuer trust root.
 - **Sibling models**: none. The Helm chart, the reverse proxy, and the
   `upload-sbom` GitHub Action live in other repositories and are out of scope
   here (§1.3).
 
-PIA is a small network service. A CI job (a GitHub Actions workflow or a Jenkins
-pipeline) sends it an SBOM together with a short-lived OpenID Connect (OIDC)
+PIA is a small network service. A CI job (a GitHub Actions workflow, an Eclipse
+GitLab CI pipeline, or a Jenkins pipeline) sends it an SBOM together with a short-lived OpenID Connect (OIDC)
 token. PIA checks the token against the token issuer's published keys, looks up
 which Eclipse Foundation (EF) project the CI job is registered under, and
 forwards the SBOM to the matching DependencyTrack project with PIA's own API
@@ -61,8 +73,9 @@ is the one-screen version.
   follows their redirects (`P-ISSUER-PIN`); it accepts only RS256 tokens
   that verify against that issuer's keys with the right audience and lifetime
   (`P-SIG`); an upload lands only in a DependencyTrack project of the same EF
-  project as the verified workload, and GitHub runs must be maintainer
-  events (`P-WORKLOAD-BIND`); a slow issuer or DependencyTrack holds one
+  project as the verified workload; GitHub runs must be maintainer events,
+  GitLab pipelines must be committer-caused, and a GitLab project is pinned
+  by its numeric id (`P-WORKLOAD-BIND`); a slow issuer or DependencyTrack holds one
   worker, not the service (`P-NO-STALL`); issuer responses are capped
   (`P-ISSUER-BOUND`); unauthenticated input cannot forge log lines or mint
   metric series (`P-LOG-ESCAPE`, `P-METRIC-CARD`).
@@ -70,15 +83,16 @@ is the one-screen version.
   against a trickling registered issuer (`D-SLOW-RETRIEVAL`), rate limiting
   or body caps (`D-RATE-LIMIT`, `D-SBOM-VALIDATION`), per-product least
   privilege inside an EF project (`D-PRODUCT-LEAST-PRIV`), any check on what
-  a CI run did beyond its event name (`D-EVENT-SEMANTICS`, `D-JENKINS-JOB`),
+  a CI run did beyond its GitHub event name or GitLab pipeline source
+  (`D-EVENT-SEMANTICS`, `D-JENKINS-JOB`),
   defence against a compromised issuer signing for its own workloads
   (`D-ISSUER-TRUST-ROOT`), or TLS on its own socket (`D-INBOUND-TLS`).
 - *Operators own*: the reverse proxy (TLS, rate limit, body cap), a private
   `/metrics`, HTTPS to DependencyTrack and TLS to the database, a scoped
   DependencyTrack key, and the curated registration file (§1.13).
-- *Publishers own*: keeping publishing workflows free of untrusted code,
-  treating the ID token as a credential, and polling rather than retrying
-  (§1.13).
+- *Publishers own*: keeping publishing workflows and pipelines free of
+  untrusted code, treating pipeline write access and the ID token as
+  credentials, and polling rather than retrying (§1.13).
 
 **Glossary.** *Sink*: the exact parameter a finding is reported against.
 *Disposition*: the one bucket a finding lands in (§1.17). *Disclaimed
@@ -131,24 +145,28 @@ token issuers and DependencyTrack (authenticated collaborators, see §1.10).
 | `auth` — bearer parsing, issuer allowlist, OIDC discovery and JWKS fetch, signature and claim verification, workload matching (`pia/main.py` `authenticate`, `pia/oidc.py`, matching helpers in `pia/models.py`) | `POST /v1/upload/sbom`, `Authorization` header | yes: HTTPS to the token issuer, PostgreSQL reads | in | *(documented, DESIGN.md §3.1.1)* |
 | `upload-relay` — DependencyTrack project resolution and SBOM relay (`pia/main.py` `upload_sbom`, `pia/dependencytrack.py`) | `POST /v1/upload/sbom` body | yes: HTTPS to DependencyTrack, PostgreSQL reads | in | *(documented, DESIGN.md §3.1 steps 5–6)* |
 | `ops-endpoints` — liveness, Prometheus metrics, request-ID and metrics middleware (`pia/main.py`, `pia/metrics.py`) | `GET /livez`, `GET /metrics`, every request | no (serves process memory) | in | *(documented, DESIGN.md §4.1)* |
-| `operator-tooling` — `pia sync`, `pia create-dt-projects` (`pia/cli.py`, `pia/sync.py`) and the Alembic migrations (`alembic/`) | `pia sync FILE`, `alembic upgrade head` | yes: reads the curated file and `PIA_*` env, HTTPS to GitHub and DependencyTrack, PostgreSQL writes | in, at operator trust (§1.7) | *(documented, DESIGN.md §5.5 and README "Database Migration")* |
+| `operator-tooling` — `pia sync`, `pia create-dt-projects` (`pia/cli.py`, `pia/sync.py`) and the Alembic migrations (`alembic/`) | `pia sync FILE`, `alembic upgrade head` | yes: reads the curated file and `PIA_*` env, HTTPS to GitHub, Eclipse GitLab and DependencyTrack, PostgreSQL writes | in, at operator trust (§1.7) | *(documented, DESIGN.md §5.5 and README "Database Migration")* |
 | `dev-bootstrap-script` — `scripts/dt_bootstrap.py` | `uv run python scripts/dt_bootstrap.py` | yes (local HTTP) | out (§1.3) | *(documented, `scripts/dt_bootstrap.py` docstring "Targets the local docker-compose DependencyTrack only")* |
 | `dev-compose-stack` — `docker-compose.yml`, `projects.local.yaml` | `docker compose up` | yes | out (§1.3) | *(documented, docker-compose.yml "Dev-only convenience" comment)* |
 | `tests` — `tests/` | `pytest` | no | out (§1.3) | *(documented, README "Running Tests")* |
 
 ## 1.3 Out of scope (explicit non-goals)
 
-- **Not a general OIDC relying party.** Only GitHub's issuer and registered
+- **Not a general OIDC relying party.** Only GitHub's issuer, the Eclipse
+  GitLab issuer `https://gitlab.eclipse.org`, and registered
   `https://ci.eclipse.org/<name>/oidc` Jenkins issuers, only RS256
   *(documented, DESIGN.md §3.1.1 steps 2 and 4 "Verify signature using
-  RSA256")*. Other issuers, algorithms, or token formats are unsupported
+  RSA256")*. Other GitLab instances, including gitlab.com, are not
+  supported *(documented, `pia/models.py` `GITLAB_ISSUER` docstring
+  "Constant across all GitLab workloads")*. Other issuers, algorithms, or token formats are unsupported
   inputs, not bugs.
 - **DependencyTrack's own access control.** DependencyTrack trusts PIA's API
   key wholesale; limiting the key is the operator's job *(documented,
   DESIGN.md §2.2 item 3; `pia/cli.py` module docstring)*.
 - **The trust root.** A registered issuer signing for its own workloads is
-  believed; PIA cannot detect a compromised GitHub OIDC provider or Jenkins
-  controller *(documented, DESIGN.md §2.2 items 1–2)*. What PIA does bound
+  believed; PIA cannot detect a compromised GitHub OIDC provider, Eclipse
+  GitLab instance, or Jenkins controller *(documented, DESIGN.md §2.2 items
+  1–2)*. What PIA does bound
   about an issuer is `P-ISSUER-PIN` and `P-ISSUER-BOUND` (§1.11).
 - **Inbound TLS and rate limiting.** PIA listens on plain HTTP (`Dockerfile`
   `CMD`); both belong to the reverse proxy *(documented, DESIGN.md §8.1 and
@@ -157,14 +175,19 @@ token issuers and DependencyTrack (authenticated collaborators, see §1.10).
   boundary: any registered workload of a project may publish to any of its
   products *(documented, README "Authorization is scoped to the Eclipse
   Foundation project")*.
-- **The CI side.** PIA checks the GitHub `event_name` and nothing else about
-  what a run did *(documented, DESIGN.md §3.1.1 step 6)*.
+- **The CI side.** PIA checks the GitHub `event_name` or the GitLab
+  `pipeline_source` and nothing else about what a run did *(documented,
+  DESIGN.md §3.1.1 step 6)*.
 - **Insiders of a registered project.** Repository registrations scope which
   pipelines publish; they are not a boundary between members of one
   organization. The owner's immutable id is pinned so an *outsider* cannot
   re-register a deleted or renamed organization; reusing a repository name
   inside the organization needs a position inside the project's trust domain
-  *(maintainer, 2026-10)*.
+  *(maintainer, 2026-10)*. On Eclipse GitLab, the Developer and Maintainer
+  members of a registered project are its insiders in the same sense
+  *(maintainer, 2026-11)*. One exception: the GitLab `project_id` pin is
+  claimed against everyone, insiders included (`P-WORKLOAD-BIND`)
+  *(maintainer, 2026-11)*.
 - **Host and cluster compromise.** Whoever reads the pod's environment holds
   the API key and database credentials *(documented, DESIGN.md §8.2 required
   environment variables)*; that attacker is out of scope *(maintainer,
@@ -183,10 +206,11 @@ token issuers and DependencyTrack (authenticated collaborators, see §1.10).
 ```mermaid
 flowchart LR
     subgraph internet [Internet]
-        CI[CI job: GitHub Actions / Jenkins pipeline]
+        CI[CI job: GitHub Actions / GitLab CI / Jenkins pipeline]
     end
     subgraph idp [Token issuers]
         GH[GitHub OIDC provider]
+        GL[Eclipse GitLab OIDC provider]
         JK[Registered Jenkins /oidc]
     end
     subgraph cluster [EF cluster]
@@ -197,9 +221,11 @@ flowchart LR
     end
     OP[Operator: pia sync, alembic]
     CI -- "1. token request" --> GH
+    CI -- "1. token request" --> GL
     CI -- "1. token request" --> JK
     CI -- "2. POST /v1/upload/sbom + Bearer token" --> PX --> PIA
     PIA -- "3. discovery + JWKS (allowlisted origin only)" --> GH
+    PIA -- "3. discovery + JWKS (allowlisted origin only)" --> GL
     PIA -- "3. discovery + JWKS (allowlisted origin only)" --> JK
     PIA -- "4. issuer / workload / product lookup (read-only)" --> DB
     PIA -- "5. PUT /api/v1/bom + X-Api-Key" --> DT
@@ -229,8 +255,8 @@ Reachability preconditions:
   unmatched routes and unknown methods *(documented, DESIGN.md §5.4 "Label
   cardinality")*.
 - `operator-tooling`: reachable from the curated file, the `PIA_*`
-  environment, or a GitHub / DependencyTrack API response; all are operator
-  trust *(documented, DESIGN.md §5.5 "human-curated file")*.
+  environment, or a GitHub, Eclipse GitLab or DependencyTrack API response;
+  all are operator trust *(documented, DESIGN.md §5.5 "human-curated file")*.
 
 ## 1.5 Assumptions about the environment
 
@@ -245,7 +271,9 @@ Reachability preconditions:
   no leeway *(documented, DESIGN.md §3.1.1 step 4)*; outbound HTTPS goes to
   the allowlisted issuers and DependencyTrack, the CLI also to
   `api.github.com` *(documented, `pia/sync.py` `fetch_github_owner_id`
-  docstring)*; the app's database user needs read access only *(documented,
+  docstring)* and, anonymously, to `https://gitlab.eclipse.org/api/v4`
+  *(documented, `pia/sync.py` `fetch_gitlab_project_id` docstring "Anonymous
+  access suffices")*; the app's database user needs read access only *(documented,
   README "Database Migration")*.
 
 No-surprise side-effects inventory, from a scan of every file the image ships
@@ -258,8 +286,11 @@ No-surprise side-effects inventory, from a scan of every file the image ships
   files *(maintainer, 2026-11)*.
 - PIA's own code reads only `PIA_*` environment variables (`pia/config.py`
   `env_prefix="PIA_"`, `pia/cli.py`, `alembic/env.py`) *(maintainer, 2026-11)*.
-- The only sockets PIA's own code opens are HTTPS to the allowlisted issuer,
-  the configured DependencyTrack URL, `api.github.com` (CLI only), and the
+- The only sockets PIA's own code opens are HTTPS to the allowlisted issuer
+  (GitHub, Eclipse GitLab, or a registered Jenkins), the configured
+  DependencyTrack URL, `api.github.com` and the `gitlab.eclipse.org` REST API
+  (CLI only; the GitLab call is anonymous, and every CLI call has a per-read
+  timeout), and the
   database *(maintainer, 2026-11)*.
 - Process-wide mutation is limited to import time in `pia/main.py`: the
   logging record factory and `basicConfig`, the `Settings()` load, and the
@@ -285,7 +316,7 @@ envelope:
 | uvicorn `--workers N>1` | 1 | Each worker keeps its own metrics registry; `/metrics` becomes wrong. | unsupported (needs multiprocess mode) | *(documented, DESIGN.md §5.4 "Single worker")* |
 | uvicorn `--reload`, migrations on app start | off | Dev conveniences in `docker-compose.yml`. | dev-only | *(documented, docker-compose.yml comments)* |
 | `pia sync --allow-db-updates-and-deletions` | off | Without it, `pia sync` refuses a plan that deletes or changes existing rows, so a bad file cannot silently deauthorize a project. | supported; explicit intent required | *(documented, `pia/cli.py` option help "Explicit intent is required")* |
-| `GITHUB_ALLOWED_EVENT_NAMES`, `JENKINS_ISSUER_BASE_URL` | `{push, workflow_dispatch, release, schedule}`, `https://ci.eclipse.org` | Code constants, not configuration. Changing either is a model change (§1.16). | n/a | *(documented, `pia/models.py` constant docstrings)* |
+| `GITHUB_ALLOWED_EVENT_NAMES`, `GITLAB_ALLOWED_PIPELINE_SOURCES`, `GITLAB_ISSUER`, `JENKINS_ISSUER_BASE_URL` | `{push, workflow_dispatch, release, schedule}`, `{push, web, schedule}`, `https://gitlab.eclipse.org`, `https://ci.eclipse.org` | Code constants, not configuration. Changing any of them is a model change (§1.16). | n/a | *(documented, `pia/models.py` constant docstrings)* *(maintainer, 2026-11)* |
 
 No shipped default voids a §1.11 property. Rows written to the database by
 anything other than `pia sync` are unsupported: the ORM comment states that the
@@ -308,6 +339,7 @@ streams it; the SBOM is a base64 string it does not decode *(documented, issue
 | `POST /v1/upload/sbom` | unverified JWT `iss` claim (selects the discovery URL) | yes | resource-name | none — `P-ISSUER-PIN` | *(documented, DESIGN.md §3.1.1 step 2)* |
 | `POST /v1/upload/sbom` | JWT header `kid`, `alg` | yes | data, type-class | none — `P-SIG` (RS256 only, `kid` must match a `sig` key) | *(documented, DESIGN.md §3.1.1 step 4 "Verify signature using RSA256")* |
 | `POST /v1/upload/sbom` | verified claims `aud`, `exp`, `iat`, `repository`, `repository_owner_id`, `event_name` | conditional: only a registered issuer can sign them; the triggering actor chooses `event_name`, `ref` and similar within what the issuer allows | data | none — `P-SIG`, `P-WORKLOAD-BIND` | *(documented, DESIGN.md §3.1.1 steps 5–6)* |
+| `POST /v1/upload/sbom` | verified GitLab claims `project_path`, `project_id`, `pipeline_source` | conditional: only Eclipse GitLab can sign them, but any account holder there can mint a token for a project they own; in a merge request pipeline the project claims name the MR's *source* project (the fork); the triggering actor chooses `pipeline_source` and `ref` within what GitLab allows | data | none — `P-SIG`, `P-WORKLOAD-BIND` | *(documented, `pia/models.py` `find_workload_by_claims` comment "NOT `job_project_*`")* *(maintainer, 2026-11)* |
 | `POST /v1/upload/sbom` | body `product_name` | yes (authenticated workload) | resource-name | none — `P-WORKLOAD-BIND` resolves it only within the workload's EF project | *(documented, README authorization note)* |
 | `POST /v1/upload/sbom` | body `product_version`, `is_latest` | yes (authenticated workload) | data | DependencyTrack validates; PIA relays verbatim (`D-SBOM-VALIDATION`) | *(documented, DESIGN.md §3.1 step 6)* |
 | `POST /v1/upload/sbom` | body `bom` (base64 CycloneDX) | yes (authenticated workload) | data, size | proxy caps the body size; DependencyTrack validates content (`D-SBOM-VALIDATION`) | *(documented, DESIGN.md §3.1 step 3 "so that we don't have to parse the SBOM")* |
@@ -319,7 +351,7 @@ streams it; the SBOM is a base64 string it does not decode *(documented, issue
 | `GET /livez`, `GET /metrics` | none (query and headers ignored) | yes, but unused | data | nothing | *(documented, DESIGN.md §4.1)* |
 | `pia sync FILE`, `pia create-dt-projects FILE` | curated YAML file | no — operator-authored, the authorization policy itself | data, serialized-state, resource-name | keep it correct and canonical (`curate-authorization-file`, §1.13) | *(documented, DESIGN.md §5.5 "curated projects file")* |
 | `pia sync`, `pia create-dt-projects` | `PIA_DATABASE_URL`, `PIA_DEPENDENCY_TRACK_API_KEY`, `PIA_GITHUB_TOKEN`, `--dt-url` | no — operator environment | data, resource-name | keep secrets out of logs and shell history | *(documented, `pia/cli.py` module docstring)* |
-| `pia sync`, `pia create-dt-projects` | GitHub `GET /users/{owner}` and DependencyTrack project API responses | conditional: those services only | data | treated as trusted collaborator output (§1.10) | *(documented, `pia/sync.py` `build_desired` docstring)* |
+| `pia sync`, `pia create-dt-projects` | GitHub `GET /users/{owner}`, Eclipse GitLab `GET /api/v4/projects/{path}` and DependencyTrack project API responses | conditional: those services only | data | treated as trusted collaborator output (§1.10); a GitLab answer whose canonical `path_with_namespace` differs from the listed path aborts the sync, and so does a 404, which anonymous lookups also return for private or internal projects | *(documented, `pia/sync.py` `build_desired` and `fetch_gitlab_project_id` docstrings)* |
 | `alembic upgrade head` | `PIA_DATABASE_URL`; shipped migration scripts | no — operator environment and shipped code | data, resource-name | run with migration credentials, before rollout | *(documented, README "Database Migration")* |
 | app start | `PIA_*` settings | no — operator environment | data, resource-name | §1.6 | *(documented, DESIGN.md §4.2)* |
 
@@ -341,7 +373,7 @@ component):
 | `upload-relay` | recursive/cyclic topology | N/A — the body schema is four flat fields; the SBOM is an opaque string | — | §1.11 `P-SBOM-OPAQUE` | *(documented, DESIGN.md §4.1 request body)* |
 | `upload-relay` | callback/collaborator execution | disclaimed | DependencyTrack's response is relayed verbatim; PIA does not sanitize it | §1.12 `D-DT-RESPONSE` | *(documented, DESIGN.md §4.1 "verbatim")* |
 | `upload-relay` | serialization/reconstruction | claimed | the SBOM is never decoded or parsed by PIA | §1.11 `P-SBOM-OPAQUE` | *(documented, DESIGN.md §3.1 step 3)* |
-| `upload-relay` | reference lifecycle | claimed | the target project is resolved per request from the database; a `pia sync` change applies to the next request | §1.11 `P-WORKLOAD-BIND` | *(documented, DESIGN.md §3.1 step 5)* |
+| `upload-relay` | reference lifecycle | claimed | the target project is resolved per request from the database; a `pia sync` change applies to the next request; a GitLab workload matches only the `project_id` recorded at sync, so a project re-created at a registered path is rejected until re-synced | §1.11 `P-WORKLOAD-BIND` | *(documented, DESIGN.md §3.1 step 5; `pia/models.py` `GitLabWorkload` docstring "resurrection guard")* |
 | `upload-relay` | concurrency/reentrancy | claimed | the DependencyTrack call has connect/read timeouts and runs in the threadpool | §1.11 `P-NO-STALL` | *(documented, `pia/dependencytrack.py` `TIMEOUT` docstring)* |
 | `upload-relay` | resource complexity | disclaimed | the whole body, its parse, and the base64 string sit in memory at once | §1.12 `D-SBOM-VALIDATION` | *(documented, issue #111 "Memory in PIA")* |
 | `ops-endpoints` | numeric domain | claimed | every label value comes from a fixed set, a route template, or a database row | §1.11 `P-METRIC-CARD` | *(documented, DESIGN.md §5.4 "Label cardinality")* |
@@ -355,11 +387,11 @@ component):
 | `operator-tooling` | numeric domain | disclaimed | no limits on file size, project count, or API response size | §1.12 `D-CLI-BOUNDS` | *(documented, DESIGN.md §5.5 states no limits)* |
 | `operator-tooling` | failure atomicity | claimed | `pia sync` applies its plan in one transaction and commits at the end; `create-dt-projects` is idempotent but not atomic | §1.11 `P-SYNC-ATOMIC`; §1.12 `D-EXTERNAL-ATOMICITY` | *(documented, `pia/sync.py` `apply_plan` docstring; `pia/cli.py` `create_dt_projects` help "Idempotent")* |
 | `operator-tooling` | recursive/cyclic topology | N/A — the file schema is two levels deep with `extra="forbid"` | — | §1.7 | *(documented, `pia/sync.py` module docstring file example)* |
-| `operator-tooling` | callback/collaborator execution | N/A — GitHub and DependencyTrack are trusted collaborators whose answers (owner ids, UUIDs) are taken as true | — | §1.10 | *(documented, `pia/sync.py` `build_desired` docstring)* |
+| `operator-tooling` | callback/collaborator execution | N/A — GitHub, Eclipse GitLab and DependencyTrack are trusted collaborators whose answers (owner ids, project ids, UUIDs) are taken as true | — | §1.10 | *(documented, `pia/sync.py` `build_desired` docstring)* |
 | `operator-tooling` | serialization/reconstruction | N/A — the file is operator-trusted and loaded with `yaml.safe_load`, which constructs no arbitrary objects | — | §1.7 | *(documented, DESIGN.md §5.5 "curated")* |
 | `operator-tooling` | reference lifecycle | claimed | rows are keyed by their business columns; a changed row is a delete plus a create | §1.11 `P-SYNC-ATOMIC` | *(documented, `pia/sync.py` `compute_plan` docstring)* |
 | `operator-tooling` | concurrency/reentrancy | disclaimed | no lock between concurrent `pia sync` runs | §1.12 `D-CLI-BOUNDS` | *(documented, DESIGN.md §5.5 makes no concurrency statement)* |
-| `operator-tooling` | resource complexity | disclaimed | GitHub and DependencyTrack calls carry no timeout; interactive use | §1.12 `D-CLI-BOUNDS` | *(documented, DESIGN.md §5.5 makes no resource statement)* |
+| `operator-tooling` | resource complexity | disclaimed | GitHub, Eclipse GitLab and DependencyTrack calls have 5 s connect and 30 s per-read timeouts but no total deadline; interactive use | §1.12 `D-CLI-BOUNDS` | *(documented, `pia/sync.py` `TIMEOUT` docstring "not the total request time")* |
 
 Failure postconditions: the service mutates no state, so none apply to `auth`
 or `ops-endpoints`. For `upload-relay`, the DependencyTrack write may have
@@ -374,12 +406,12 @@ failure before `session.commit()` leaves the database unchanged
 | DependencyTrack upload request (`projectName`, `projectVersion`, `isLatest`, `bom`, plus `parentUUID` from the database and `autoCreate: true`) | `upload-relay` | Exactly as untrusted as the client's payload; no sanitization, normalization, or decoding is performed | That the SBOM is well-formed CycloneDX, that the version string is sane, or that the name was vetted beyond matching a registered product | *(documented, DESIGN.md §3.1 step 6)* |
 | HTTP 200 body `polling_url` | `upload-relay` | **Assembled**: configured DependencyTrack URL + the `token` DependencyTrack returned | That the URL is reachable from outside the cluster | *(documented, issue #66 "polling_url should be externally reachable")* |
 | Relayed DependencyTrack error (status and body, as `application/json`) | `upload-relay` | Exactly as untrusted as DependencyTrack's answer; passed through verbatim | That the body is JSON, or free of content echoed from the SBOM | *(documented, DESIGN.md §4.1 "Relay DependencyTrack status code and body verbatim")* |
-| HTTP 401 / 422 / 502 / 500 bodies | `auth`, `upload-relay` | Constant strings, except the `claims_rejected` 401 which embeds the rejected `event_name` value (issuer-signed, chosen by the triggering actor) | That a 401 distinguishes "unknown issuer" from "unregistered workload" beyond the stated reason strings; or that it hides whether a Jenkins issuer URL is registered (`D-ISSUER-ENUMERATION`) | *(documented, DESIGN.md §4.1 response list; PR #99 description "nothing to withhold")* |
+| HTTP 401 / 422 / 502 / 500 bodies | `auth`, `upload-relay` | Constant strings, except the `claims_rejected` 401 which embeds the rejected GitHub `event_name` or GitLab `pipeline_source` value (issuer-signed, chosen by the triggering actor) | That a 401 distinguishes "unknown issuer" from "unregistered workload" beyond the stated reason strings; or that it hides whether a Jenkins issuer URL is registered (`D-ISSUER-ENUMERATION`) | *(documented, DESIGN.md §4.1 response list; PR #99 description "nothing to withhold")* |
 | `X-Request-ID` response header | `ops-endpoints` | Server-generated 16 hex characters; never taken from the request | Correlation with an inbound header | *(documented, `pia/main.py` `assign_request_id` docstring)* |
-| Log lines (stdout) | all service components | **Assembled**: caller-influenced values (`iss`, allowlisted claims, `product_name`, `product_version`, DependencyTrack body up to 500 bytes) are ASCII-escaped with `!a`; the bearer token and API key never appear | That a log line is free of attacker-chosen text; it is escaped, not absent. The `actor` claim is deliberately not logged | *(documented, `pia/main.py` `LOGGED_CLAIMS` and `_claims_summary` docstrings)* |
+| Log lines (stdout) | all service components | **Assembled**: caller-influenced values (`iss`, allowlisted claims, `product_name`, `product_version`, DependencyTrack body up to 500 bytes) are ASCII-escaped with `!a`; the bearer token and API key never appear | That a log line is free of attacker-chosen text; it is escaped, not absent. The GitHub `actor` and GitLab `user_login` / `user_email` claims are deliberately not logged | *(documented, `pia/main.py` `LOGGED_CLAIMS` and `_claims_summary` docstrings)* |
 | `GET /metrics` text exposition | `ops-endpoints` | Label values are fixed sets, route templates, or database rows (`ef_project_id`, `product_name`); never raw request input | That the endpoint is private unless the ingress keeps it so | *(documented, DESIGN.md §5.4 and §4.1)* |
 | CLI stdout (plan) | `operator-tooling` | Row `__repr__` text built from the curated file and resolved ids | Nothing security-relevant; may contain owner ids and UUIDs | *(documented, `pia/sync.py` `format_plan` docstring)* |
-| Database rows | `operator-tooling` | Written only by `pia sync` from the curated file plus GitHub owner ids and DependencyTrack UUIDs | That rows written any other way are coherent (§1.6) | *(documented, `pia/models.py` comment "the curated file is the only writer")* |
+| Database rows | `operator-tooling` | Written only by `pia sync` from the curated file plus GitHub owner ids, GitLab project ids and DependencyTrack UUIDs | That rows written any other way are coherent (§1.6) | *(documented, `pia/models.py` comment "the curated file is the only writer")* |
 
 Structural invariants promoted to §1.11: the SBOM reaches DependencyTrack
 byte-identical (`P-SBOM-OPAQUE`); no raw request value becomes a metric label
@@ -407,9 +439,14 @@ or `PyJWKClient` without caps) is in-model.
 
 `requests` reads proxy, CA-bundle and `.netrc` settings from the host on PIA's
 behalf; the production image sets none of them (§1.5) *(maintainer, 2026-11)*. External collaborators are not code
-dependencies: a GitHub or Jenkins issuer that signs wrongly, or a
-DependencyTrack that mis-stores an upload, is handled by §1.10 (trusted peer),
-not by `dependency-contract`.
+dependencies: a GitHub, Eclipse GitLab or Jenkins issuer that signs wrongly,
+or a DependencyTrack that mis-stores an upload, is handled by §1.10 (trusted
+peer), not by `dependency-contract`. PIA relies on GitLab's documented claim
+semantics: in a merge request pipeline, `project_path` and `project_id` name
+the source project. If PIA matches the wrong claim, that is PIA's bug
+(`VALID`). If GitLab signs claims that contradict its own documentation, that
+is the issuer trust root (`D-ISSUER-TRUST-ROOT`), forwarded to GitLab
+*(maintainer, 2026-11)*.
 
 ## 1.10 Adversary model
 
@@ -419,9 +456,10 @@ Actors assume the §1.2 baseline deployment.
 | --- | --- | --- | --- | --- | --- |
 | Unauthenticated network client | **yes** | Reach the upload endpoint through the proxy; send any header, any unsigned or self-signed JWT with any `iss`, any body; repeat at the proxy's rate limit | No signing key of a registered issuer; no control over a registered issuer, DependencyTrack, the database, or the pod environment; no position on PIA's outbound connections | SSRF from PIA's network position, service stall, auth bypass, log forgery, error-path crashes | *(maintainer, 2026-11)* |
 | Non-maintainer contributor to a registered GitHub repository | **yes** | Open pull requests, comment, fork; cause `pull_request_target`, `workflow_run`, `issue_comment` runs that mint valid GitHub tokens for the repo | Cannot cause a `push`, `workflow_dispatch`, `release` or `schedule` run, and cannot author the workflow file such a run executes | Publish an SBOM as the project | *(documented, `pia/models.py` `GITHUB_ALLOWED_EVENT_NAMES` docstring "events that only a maintainer can cause")* |
-| Registered workload (a maintainer-triggered workflow or any job on a registered Jenkins) | **yes** | Hold a valid token for its own identity; choose `product_name`, `product_version`, `is_latest`, `bom`; replay its token until `exp` | Cannot obtain a token for another repository or Jenkins instance; cannot change registrations | Write into another EF project's DependencyTrack project; feed DependencyTrack malformed content | *(documented, README authorization note; DESIGN.md §4.3 "Authorization Boundary")* |
-| Registered issuer (GitHub's OIDC provider, or a registered Jenkins controller), compromised or merely slow | **yes**, for confinement claims only | Serve any discovery and JWKS content; sign tokens for its own workloads; trickle responses | Cannot steer PIA's fetches off its own origin and path; cannot make PIA buffer more than 1 MiB per response; cannot have its keys accepted for another issuer's workloads | Cross-issuer key substitution, SSRF pivot, worker exhaustion | *(documented, PR #113 description "one project's Jenkins instance cannot point PIA at another project's keys"; PR #112 description "Known limitation (accepted risk)")* |
-| Project insider: a member of a registered GitHub owner with repository-creation rights, a committer, or EF staff | no | Create repositories under the registered owner, including re-creating a deleted or renamed one; trigger allowlisted publish events | — (inside the project's trust domain; registrations scope pipelines, not insiders) | — | *(maintainer, 2026-10)* |
+| Non-committer on Eclipse GitLab: a Reporter-role member of a registered project, a fork's merge request author, a pull request author on a GitHub mirror, a holder of a leaked pipeline trigger token, or any account holder with their own project | **yes** | Run pipelines in their own projects and forks and mint valid Eclipse GitLab tokens for them; cause `merge_request_event`, `external_pull_request_event` or `trigger` pipelines in a registered project | Cannot push to a registered project, press "Run pipeline" there, or own a schedule there, so cannot cause a `push`, `web` or `schedule` pipeline in it; cannot obtain a token whose `project_path` and `project_id` name a registered project from a fork | Publish an SBOM as the project | *(documented, `pia/models.py` `GITLAB_ALLOWED_PIPELINE_SOURCES` docstring)* *(maintainer, 2026-11)* |
+| Registered workload (a maintainer-triggered workflow, a committer-caused pipeline of a registered GitLab project, or any job on a registered Jenkins) | **yes** | Hold a valid token for its own identity; choose `product_name`, `product_version`, `is_latest`, `bom`; replay its token until `exp` | Cannot obtain a token for another repository, GitLab project or Jenkins instance; cannot change registrations | Write into another EF project's DependencyTrack project; feed DependencyTrack malformed content | *(documented, README authorization note; DESIGN.md §4.3 "Authorization Boundary")* |
+| Registered issuer (GitHub's OIDC provider, the Eclipse GitLab instance, or a registered Jenkins controller), compromised or merely slow | **yes**, for confinement claims only | Serve any discovery and JWKS content; sign tokens for its own workloads; trickle responses | Cannot steer PIA's fetches off its own origin and path; cannot make PIA buffer more than 1 MiB per response; cannot have its keys accepted for another issuer's workloads | Cross-issuer key substitution, SSRF pivot, worker exhaustion | *(documented, PR #113 description "one project's Jenkins instance cannot point PIA at another project's keys"; PR #112 description "Known limitation (accepted risk)")* |
+| Project insider: a member of a registered GitHub owner with repository-creation rights, a Developer or Maintainer of a registered GitLab project, a committer, or EF staff | no | Create repositories under the registered owner, including re-creating a deleted or renamed one; push, run, schedule or include CI configuration in a registered GitLab project; trigger allowlisted publish events | Having a GitLab project re-created at a registered path accepted: the `project_id` pin is claimed against insiders too, so such a bypass is `VALID`, not out of scope | — | *(maintainer, 2026-10)* *(maintainer, 2026-11)* |
 | Operator (curated file, `PIA_*` secrets, deploy) | no | Everything | — (trusted wholesale) | — | *(documented, DESIGN.md §2.2 "managed by Eclipse Foundation")* |
 | DependencyTrack and PostgreSQL | no, trusted collaborators | Answer PIA's requests with anything | — | — | *(documented, DESIGN.md §2.2 item 3)* |
 | Network attacker between PIA and the issuer, DependencyTrack, or the database | no | — | — | — | *(maintainer, 2026-11)* |
@@ -438,14 +476,14 @@ Actors assume the §1.2 baseline deployment.
   security-critical. *Voided by*: nothing. Search:
   `grep -rn 'verify_signature\|algorithms=\|verify=' pia/` — 3 hits:
   `pia/oidc.py:177` and `pia/oidc.py:180` (the verifying decode) and
-  `pia/main.py:271` (`verify_signature=False`), whose output only selects the
+  `pia/main.py:281` (`verify_signature=False`), whose output only selects the
   issuer allowlist row and never reaches an authorization decision.
   *(documented, DESIGN.md §3.1.1 steps 3–4)*
 - **`P-ISSUER-PIN` Outbound fetch confinement** (`auth`): the two
   pre-authentication fetches go only to an allowlisted issuer origin. The
-  unverified `iss` must be a string equal to the GitHub issuer or a registered
-  Jenkins issuer (`pia/models.py:253`, `pia/models.py:256`,
-  `pia/models.py:264`); `jwks_uri` must start with `{iss}/` and continue with
+  unverified `iss` must be a string equal to the GitHub issuer, the Eclipse
+  GitLab issuer, or a registered Jenkins issuer (`pia/models.py:307`,
+  `pia/models.py:310`, `pia/models.py:318`); `jwks_uri` must start with `{iss}/` and continue with
   unreserved characters and no `.` or `..` segments (`pia/oidc.py:50`,
   `pia/oidc.py:54`, `pia/oidc.py:57`); redirects are refused and only HTTP 200
   is accepted (`pia/oidc.py:82`). *Violation symptom*:
@@ -468,12 +506,46 @@ Actors assume the §1.2 baseline deployment.
 - **`P-WORKLOAD-BIND` Project-scoped authorization** (`auth`,
   `upload-relay`): verified claims must match exactly one registered workload
   — GitHub by owner, repository name and `repository_owner_id`
-  (`pia/models.py:291`, `pia/models.py:292`, `pia/models.py:293`), Jenkins by
-  `iss` (`pia/models.py:296`); a GitHub `event_name` must be one of `push`,
-  `workflow_dispatch`, `release`, `schedule` (`pia/models.py:311`); the
-  target is resolved by `product_name` only among projects with the
-  workload's `ef_project_id` (`pia/models.py:324`); one identity maps to one
-  EF project by uniqueness (`pia/models.py:138`, `pia/models.py:164`).
+  (`pia/models.py:346`, `pia/models.py:347`, `pia/models.py:348`), GitLab by
+  `project_path` and `project_id` (`pia/models.py:366`, `pia/models.py:367`),
+  Jenkins by `iss` (`pia/models.py:370`); a GitHub `event_name` must be one of
+  `push`, `workflow_dispatch`, `release`, `schedule` (`pia/models.py:385`); a
+  GitLab `pipeline_source` must be one of `push`, `web`, `schedule`
+  (`pia/models.py:392`); the target is resolved by `product_name` only among
+  projects with the workload's `ef_project_id` (`pia/models.py:405`); one
+  identity maps to one EF project by uniqueness (`pia/models.py:155`,
+  `pia/models.py:191`, `pia/models.py:217`). For GitLab this means three
+  things:
+  - **Fork pipelines never match.** In a merge request pipeline, the
+    `project_path`, `project_id` and `namespace_*` claims name the MR's
+    source project, which is the fork. This holds even when the pipeline
+    runs in the registered project, where `job_project_*` and
+    `ci_config_ref_uri` name the parent. PIA matches the source project, so
+    a fork's token never matches the parent's registration. PIA does not
+    match on `job_project_*` *(documented, `pia/models.py`
+    `find_workload_by_claims` comment "NOT `job_project_*`")*.
+  - **Committer-caused pipelines only.** `push` and `web` (the "Run
+    pipeline" button) need write access to the project, and `schedule` runs
+    as the committer who owns the schedule. Excluded are
+    `external_pull_request_event`, which a pull request from anyone can
+    drive on a GitHub-mirrored project; `trigger`, which a leaked trigger
+    token can drive; and `merge_request_event`, which publishes unmerged
+    code *(documented, `pia/models.py` `GITLAB_ALLOWED_PIPELINE_SOURCES`
+    docstring)*. The remaining sources (`api`, `pipeline`,
+    `parent_pipeline`, `chat`, `webide` and others) stay excluded until a
+    project asks for them *(maintainer, 2026-11)*.
+  - **Resurrection guard.** The `project_id` recorded at `pia sync` must
+    match, so a project or namespace that was deleted, renamed or
+    transferred and then re-created at the registered path is rejected
+    until re-synced *(documented, `pia/models.py` `GitLabWorkload`
+    docstring "resurrection guard")*. No namespace id is pinned: deleting a
+    group deletes its projects, so a re-created namespace means re-created
+    projects with new ids, and all Eclipse GitLab projects live under an
+    EF-managed root group *(documented, `pia/models.py` `GitLabWorkload`
+    docstring "No separate namespace id is needed")*. This guard holds
+    against insiders too: a reproducible bypass is `VALID` whoever
+    re-creates the path *(maintainer, 2026-11)*.
+
   *Violation symptom*: `integrity-bypass`. *Tier*: security-critical.
   *Voided by*: nothing at run time; the binding is as good as the registration
   (§1.7). Search:
@@ -492,8 +564,8 @@ Actors assume the §1.2 baseline deployment.
   0.9.0 "#112"; PR #112 description)*
 - **`P-LOG-ESCAPE` Log integrity before authentication** (`auth`,
   `ops-endpoints`): values logged before the signature check — the unverified
-  `iss` (`pia/main.py:285`) and decode or verification errors
-  (`pia/main.py:275`, `pia/main.py:297`) — are ASCII-escaped with `!a`; the
+  `iss` (`pia/main.py:295`) and decode or verification errors
+  (`pia/main.py:285`, `pia/main.py:307`) — are ASCII-escaped with `!a`; the
   request ID is server-generated (`pia/main.py:163`) and an inbound
   `X-Request-ID` is ignored; the token and API key are never logged.
   *Violation symptom*: `x-log-forgery` or `info-leak`. *Tier*:
@@ -504,9 +576,9 @@ Actors assume the §1.2 baseline deployment.
   CHANGELOG 0.3.0 "#60")*
 - **`P-LOG-ESCAPE-AUTHED` Log integrity after authentication** (`auth`,
   `upload-relay`): values logged only after a token verified — the claims
-  summary (`pia/main.py:229`), `product_name` (`pia/main.py:366`),
-  `product_version` (`pia/main.py:383`), the DependencyTrack body
-  (`pia/main.py:418`) — are escaped the same way, and each line's fixed text
+  summary (`pia/main.py:239`), `product_name` (`pia/main.py:376`),
+  `product_version` (`pia/main.py:393`), the DependencyTrack body
+  (`pia/main.py:428`) — are escaped the same way, and each line's fixed text
   names the caller's real `ef_project_id`. *Violation symptom*:
   `x-log-forgery`. *Tier*: correctness-only: the forger holds a valid token
   from a registered project and the line still names it, so a gap here is
@@ -526,15 +598,17 @@ Actors assume the §1.2 baseline deployment.
   collapses to a fixed set (`pia/metrics.py:71`), the path is the route
   template or `<unmatched>`, `reason` and `outcome` are `Literal` types, and
   `product_name` is labeled only after resolving to a database row
-  (`pia/main.py:371`). *Violation symptom*: `unbounded-allocation`. *Tier*:
+  (`pia/main.py:381`). *Violation symptom*: `unbounded-allocation`. *Tier*:
   security-critical. *Voided by*: nothing. Search: `grep -rn '\.labels(' pia/`
   — 6 call sites: four in `pia/main.py` bound as above, two in `pia/oidc.py`
   with constant `phase` values. *(documented, DESIGN.md §5.4 "Label
   cardinality")*
 - **`P-OUTBOUND-TLS` Outbound transport security** (`auth`, `upload-relay`,
   `operator-tooling`): issuer URLs are HTTPS by construction (the GitHub
-  constant; Jenkins issuers must start with `https://ci.eclipse.org/`,
-  `pia/models.py:260`), and `requests` verifies certificates by default.
+  and GitLab constants; Jenkins issuers must start with
+  `https://ci.eclipse.org/`, `pia/models.py:314`), the CLI's GitHub and
+  GitLab API URLs are HTTPS constants, and `requests` verifies certificates
+  by default.
   *Violation symptom*: `info-leak` (token, API key or SBOM in cleartext).
   *Tier*: security-critical. *Voided by*: an `http://` DependencyTrack URL —
   `pia/config.py:29` declares the setting as `HttpUrl`, which accepts either
@@ -542,15 +616,17 @@ Actors assume the §1.2 baseline deployment.
   — no hits. *(maintainer, 2026-11)*
 - **`P-SBOM-OPAQUE` SBOM passthrough** (`upload-relay`): `bom` is relayed
   byte-identical and never decoded; its size is derived arithmetically
-  (`pia/main.py:377`). *Violation symptom*: `wrong-output`. *Tier*:
+  (`pia/main.py:387`). *Violation symptom*: `wrong-output`. *Tier*:
   correctness-only. *Voided by*: nothing. *(documented, DESIGN.md §3.1
   step 3)*
 - **`P-SYNC-ATOMIC` All-or-nothing authorization sync** (`operator-tooling`):
   `pia sync` prints its plan, refuses deletions or updates without
-  `--allow-db-updates-and-deletions` (`pia/cli.py:134`), applies the plan in
-  one transaction and commits once (`pia/cli.py:143`); the validator rejects
+  `--allow-db-updates-and-deletions` (`pia/cli.py:137`), applies the plan in
+  one transaction and commits once (`pia/cli.py:146`); the validator rejects
   duplicate project ids, workload URLs and DependencyTrack names
-  (`pia/sync.py:151`, `pia/sync.py:161`). *Violation symptom*:
+  (`pia/sync.py:168`, `pia/sync.py:178`); a GitLab project URL whose path
+  is not GitLab's canonical spelling aborts the sync (`pia/sync.py:237`)
+  *(documented, DESIGN.md §5.5 "must use the project's canonical path")*. *Violation symptom*:
   `x-partial-authorization-state`. *Tier*: correctness-only. *Voided by*:
   nothing. *(documented, `pia/cli.py` `sync` help; DESIGN.md §5.5)*
 
@@ -562,11 +638,13 @@ De-identified from the phase-3.6 backtest.
 | --- | --- | --- | --- | --- | --- |
 | Unsigned token whose `iss` passes the allowlist check but resolves to another host, so PIA's discovery fetch goes there | `Authorization` → `iss` | network reach only | outbound request to an attacker-chosen host | `VALID` | `P-ISSUER-PIN` |
 | Static analyzer flags `jwt.decode(..., verify_signature=False)` as "JWT accepted without signature check" | `Authorization` | nothing — a code pattern | integrity bypass | `KNOWN-NON-FINDING` **(closed)** | `KNF-UNVERIFIED-DECODE` → `P-SIG` |
-| A registered Jenkins issuer trickles response headers and holds a worker for minutes | issuer response | control of a registered issuer | worker exhaustion | `BY-DESIGN: property-disclaimed` **(closed)** | `D-SLOW-RETRIEVAL` |
+| A group member deletes a registered GitLab project, re-creates one at the same path, and its token is accepted | verified GitLab claims | Maintainer role in the namespace | integrity bypass | `VALID` | `P-WORKLOAD-BIND` (rule 6 does not fire) |
 | Database connection string without TLS exposes registrations on the wire | `PIA_DATABASE_URL` | position on the database network | info leak | `BY-DESIGN: property-disclaimed` **(closed)** | `D-DB-TRANSPORT` |
 
 Row 2 shows precedence: `P-SIG` would also answer the report, but an exact
-§1.15 match is rule 1 and fires first. Row 4 shows the provenance gate at
+§1.15 match is rule 1 and fires first. Row 3 shows the one exception to
+rule 6: the attacker is a project insider, but the `project_id` pin is
+claimed against insiders, so the report is `VALID` if it reproduces. Row 4 shows the provenance gate at
 work over time: while `D-DB-TRANSPORT` was an **assumption** the same report
 escalated under `strict`; it closes now only because the maintainers ratified
 the disclaimer.
@@ -582,9 +660,9 @@ Tier is the worst impact of a report the disclaimer would close.
 | `D-RATE-LIMIT` | Rate limiting or request-volume bounds. Every unauthenticated request may cost PIA two outbound fetches and one database query. | `auth`, `upload-relay`, `ops-endpoints`; the reverse proxy owns rate limiting. | security-critical | no | *(documented, DESIGN.md §8.1 "Reverse proxy for TLS termination and rate limiting"; §8.3 "Rate limiting per project/IP at reverse proxy level")* |
 | `D-SBOM-VALIDATION` | Validation or size-capping of `bom`, `product_version`, or `product_name` content. PIA neither parses the SBOM nor bounds the body; DependencyTrack and the proxy do. | `upload-relay`; authenticated workloads. | security-critical | no | *(documented, DESIGN.md §3.1 step 3; issue #111)* |
 | `D-PRODUCT-LEAST-PRIV` | Per-workload-to-product binding. Any registered workload of an EF project may publish to every DependencyTrack product of that EF project. | `auth`, `upload-relay`; within one EF project. | security-critical | no | *(documented, README authorization note; issue #39 decision "Option A")* |
-| `D-EVENT-SEMANTICS` | Checks on what a GitHub run did: branch (`ref`), workflow file, actor, environment, or pinned SHA are not examined; only `event_name` is. | `auth`; maintainer-triggered events in a registered repository. | security-critical | no | *(documented, DESIGN.md §3.1.1 step 6 lists the one check)* |
+| `D-EVENT-SEMANTICS` | Checks on what a GitHub run or GitLab pipeline did. For GitHub, branch (`ref`), workflow file, actor, environment, or pinned SHA are not examined; only `event_name` is. For GitLab, `ref`, `ref_protected`, `environment`, `ci_config_ref_uri`, `sub` and the requesting job are not examined; only `pipeline_source` is. GitLab binds claims to the project and the top-level pipeline and does not record which job asked for the token, so any job of any committer-caused pipeline in a registered GitLab project may publish, including jobs from `include`d files. This is the same scope PIA grants a GitHub repository. `ci_config_ref_uri` is null when the CI configuration lives in another project, and setting that up needs the Maintainer role, which is inside the trusted scope. The `sub` format is configurable per project. `ref` and `ref_protected` appear in the log only when no registered workload matches. | `auth`; maintainer-triggered events in a registered repository, committer-caused pipelines in a registered GitLab project. | security-critical | no | *(documented, DESIGN.md §3.1.1 step 6 lists the one check; `pia/main.py` `LOGGED_CLAIMS` docstring)* *(maintainer, 2026-11)* |
 | `D-JENKINS-JOB` | Job-level identity for Jenkins. Any job on a registered instance that can bind the `id-token` credential may upload; `sub` is not checked. | `auth`; registered Jenkins instances. | security-critical | no | *(documented, DESIGN.md §7.2 "No additional claims required"; §3.1.1 "Jenkins: no additional checks")* |
-| `D-ISSUER-TRUST-ROOT` | Detection of a compromised registered issuer signing for its own workloads. | `auth`; the issuer's own workloads only. Cross-issuer substitution is covered by `P-ISSUER-PIN`. | security-critical | no | *(documented, DESIGN.md §2.2 items 1–2)* |
+| `D-ISSUER-TRUST-ROOT` | Detection of a compromised or faulty registered issuer signing for its own workloads. This includes an issuer whose signed claims contradict its own documentation, for example Eclipse GitLab naming the parent project in a fork's merge request token: PIA trusts the documented meaning of each claim it matches. | `auth`; the issuer's own workloads only. Cross-issuer substitution is covered by `P-ISSUER-PIN`. If PIA matches a claim that the issuer's documentation says means something else, the report is `VALID` against `P-WORKLOAD-BIND`. | security-critical | no | *(documented, DESIGN.md §2.2 items 1–2)* *(maintainer, 2026-11)* |
 | `D-INBOUND-TLS` | TLS on the listening socket. | all service components; a deployment that exposes port 8000 without the proxy owns the exposure. | security-critical | no | *(documented, DESIGN.md §8.1; Dockerfile `CMD`)* |
 | `D-METRICS-AUTH` | Authentication on `/metrics`. The endpoint exposes EF project ids, product names, upload counts and version. | `ops-endpoints`; the ingress keeps it private. | correctness-only | no | *(documented, DESIGN.md §4.1 "served on the application port and unauthenticated")* |
 | `D-DT-RESPONSE` | Sanitization of DependencyTrack's error responses before relaying them to the client. | `upload-relay`; non-2xx answers from DependencyTrack. | correctness-only | no | *(documented, DESIGN.md §4.1 "verbatim")* |
@@ -593,11 +671,12 @@ Tier is the worst impact of a report the disclaimer would close.
 | `D-LIVEZ-STATIC` | A readiness signal. `/livez` returns a constant and does not check the database. | `ops-endpoints`. | correctness-only | no | *(documented, `pia/main.py` `livez` docstring; issue #96)* |
 | `D-ISSUER-ENUMERATION` | Hiding whether a Jenkins issuer URL is registered. The 401 reason tells an unauthenticated caller a registered issuer from an unregistered one before any signature check. | `auth`; Jenkins issuer URLs only; accepted because the information is not sensitive and the check must run before verification. | correctness-only | no | *(maintainer, 2026-07)* |
 | `D-DB-TRANSPORT` | Confidentiality or integrity of database traffic. PIA passes `PIA_DATABASE_URL` through unchanged; TLS is whatever the URL says. | all components; a deliberate limit confirmed by the maintainers, so it may close. | security-critical | no | *(maintainer, 2026-11)* |
-| `D-CLI-BOUNDS` | Timeouts, size limits, or locking in the CLI. GitHub and DependencyTrack calls in `pia sync` have no timeout; concurrent runs are not serialized. | `operator-tooling`; interactive operator use. Absence-based. | correctness-only | no | *(documented, DESIGN.md §5.5 makes no such statement)* |
+| `D-CLI-BOUNDS` | A total time bound, size limits, or locking in the CLI. GitHub, Eclipse GitLab and DependencyTrack calls in `pia sync` time out only after 5 s without a connection or 30 s without data, so a trickling API can still stall a run; concurrent runs are not serialized. | `operator-tooling`; interactive operator use. Absence-based, except the stated per-read timeout. | correctness-only | no | *(documented, DESIGN.md §5.5 makes no such statement; `pia/sync.py` `TIMEOUT` docstring)* |
 
 Well-known attack classes for an OIDC relying party, and where they land:
 SSRF via issuer or `jwks_uri` and algorithm confusion are claimed
-(`P-ISSUER-PIN`, `P-SIG`); log injection is claimed before authentication
+(`P-ISSUER-PIN`, `P-SIG`); fork pipelines publishing as the parent and
+GitLab path resurrection are claimed (`P-WORKLOAD-BIND`); log injection is claimed before authentication
 (`P-LOG-ESCAPE`); token replay, peer slowloris, volumetric DoS, and
 decompression or JSON bombs inside the SBOM are disclaimed (`D-REPLAY`,
 `D-SLOW-RETRIEVAL`, `D-RATE-LIMIT`, `D-SBOM-VALIDATION`).
@@ -620,6 +699,10 @@ Operator:
 - Treat the curated file as the authorization policy: `--dry-run` first,
   canonical repository URLs, one EF project per repository, re-sync after a
   DependencyTrack rename *(documented, DESIGN.md §5.5; issue #107; issue #87)*.
+- Re-sync after a registered GitLab project is renamed, transferred, or
+  deleted and re-created. Until then its uploads fail, and the sync plan
+  shows the change as a delete plus a create *(documented, `pia/models.py`
+  `GitLabWorkload` docstring "until it is re-synced")*.
 - Set `PIA_EXPECTED_AUDIENCE` per deployment and configure every issuer with
   it *(documented, DESIGN.md §7.1–§7.2)*.
 - Register a Jenkins instance only if everyone who can define jobs on it may
@@ -634,6 +717,13 @@ Publisher:
 - Keep workflows on `push`, `workflow_dispatch`, `release` or `schedule` free
   of untrusted code; PIA trusts the run, not its contents *(documented,
   `pia/models.py` `GITHUB_ALLOWED_EVENT_NAMES` docstring)*.
+- On Eclipse GitLab, treat Developer access to a registered project like a
+  credential: anyone who can push, press "Run pipeline" or own a schedule
+  can publish. Keep the publishing job small and separate from the build
+  job, so as few steps as possible see the token. Limit it with `rules:` to
+  release refs, and protect those branches and tags so that only
+  maintainers can push them. A protected environment with required
+  approvals adds a manual gate *(maintainer, 2026-11)*.
 - Treat the ID token as a credential; there is no replay protection
   *(documented, DESIGN.md §10 "Protect against replayed tokens")*.
 - Poll `polling_url`; a 200 means accepted, not processed *(documented,
@@ -649,19 +739,25 @@ DependencyTrack validates the SBOM; PIA forwards whatever the workload sent
   workflow that runs pull-request code hands that code a token PIA accepts;
   PIA sees a maintainer event and stops there. Keep publishing workflows free
   of untrusted inputs *(documented, `pia/models.py` `GITHUB_ALLOWED_EVENT_NAMES`
-  docstring)*.
+  docstring)*. The same holds for a GitLab `push`, `web` or `schedule`
+  pipeline: every job in it can mint a token, including jobs from `include`d
+  CI files *(maintainer, 2026-11)*.
 - **Name-based repository identity.** A deleted or renamed repository's name,
   re-created under the same owner, inherits the registration, because GitHub
   workloads are matched on owner id plus names. Not a vulnerability: whoever
   can create repositories under a registered owner is inside the project's
   trust domain, and a rename shows up at once as failed uploads *(maintainer,
   2026-10)*. Treat deletion or rename as a `pia sync` event; `repository_id`
-  matching is planned hardening *(documented, issue #108)*.
+  matching is planned hardening *(documented, issue #108)*. This applies to
+  GitHub only: GitLab workloads are pinned by `project_id`
+  (`P-WORKLOAD-BIND`).
 - **Case-variant duplicate registrations.** Two spellings of one repository
   under two EF projects pass validation and only one ever matches. Not a
   vulnerability: the file is operator-trusted, so the second authorization
   was granted by an operator *(maintainer, 2026-10)*. Keep URLs canonical
-  *(documented, issue #107)*.
+  *(documented, issue #107)*. GitLab URLs cannot hit this: `pia sync`
+  rejects a GitLab path that is not GitLab's canonical spelling
+  (`P-SYNC-ATOMIC`).
 - **Exposing the pod without the proxy**: plain HTTP, no rate limit, no body
   cap *(documented, DESIGN.md §8.1)*.
 - **An over-privileged DependencyTrack key** in the app pod widens the blast
@@ -688,8 +784,12 @@ describe what the code does, never how well the report was written.
 ## 1.16 Conditions that would change this model
 
 - A new endpoint or use case beyond SBOM upload (DESIGN.md §1.1 anticipates
-  more), a new issuer type, or a change to `GITHUB_ALLOWED_EVENT_NAMES` or
-  `JENKINS_ISSUER_BASE_URL`.
+  more), a new issuer type or GitLab instance, or a change to
+  `GITHUB_ALLOWED_EVENT_NAMES`, `GITLAB_ALLOWED_PIPELINE_SOURCES`,
+  `GITLAB_ISSUER` or `JENKINS_ISSUER_BASE_URL`.
+- GitLab changing which project its `project_path` and `project_id` claims
+  name in merge request pipelines, or Eclipse GitLab letting non-committers
+  cause `push`, `web` or `schedule` pipelines.
 - Landing replay protection (issue #9), JWKS caching (issue #8), the async
   refactor with a whole-request deadline (DESIGN.md §10), compressed or
   streamed uploads (issue #111), `repository_id` matching (issue #108), or
@@ -724,7 +824,9 @@ not create a `MODEL-GAP`; this order resolves them.
    `OUT-OF-MODEL: dependency-contract`.
 5. Requires control of a §1.7 trusted operand → `OUT-OF-MODEL: trusted-input`.
 6. Requires an excluded §1.10 capability →
-   `OUT-OF-MODEL: adversary-not-in-scope`.
+   `OUT-OF-MODEL: adversary-not-in-scope`. This rule does not apply to a
+   bypass of the GitLab `project_id` pin, which is claimed against insiders
+   too (§1.10 project-insider row) and goes on to rule 8.
 7. Concerns a §1.12 disclaimed property → `BY-DESIGN: property-disclaimed`.
 8. Violates a §1.11 claimed property → `VALID`; otherwise an easy-to-prevent
    §1.14 misuse may be `VALID-HARDENING`.
@@ -746,7 +848,7 @@ finding keeps its disposition and is not a `MODEL-GAP`.
 
 ## 1.18 Open questions for the maintainers
 
-Not applicable — all wave-1 and wave-2 questions were answered by the maintainers in 2026-11, so no inferred or assumption claim remains.
+Not applicable — every question was answered by the maintainers in 2026-11 (waves 1 and 2 for 0.9.0, wave 3 for the GitLab revision), so no inferred or assumption claim remains.
 
 ## 1.19 Machine-readable companions
 
