@@ -24,10 +24,28 @@ jobs:
       with:
         persist-credentials: false
 
+    - name: Check Python version alignment
+      run: |
+        # Dev/CI Python (.python-version) and released Python (Dockerfile)
+        # must share the same minor version; patch drift is fine.
+        want="$(cat .python-version)"
+        found=0
+        for got in $(sed -nE 's/^FROM python:([0-9]+\.[0-9]+)\..*/\1/p' Dockerfile); do
+          found=1
+          if [ "$got" != "$want" ]; then
+            echo "Dockerfile uses Python $got, .python-version says $want"
+            exit 1
+          fi
+        done
+        if [ "$found" = 0 ]; then
+          echo "No 'FROM python:X.Y.Z' line found in Dockerfile"
+          exit 1
+        fi
+
     - name: Set up Python
       uses: actions/setup-python@83679a892e2d95755f2dac6acb0bfd1e9ac5d548 # v6.1.0
       with:
-        python-version: '3.14.2'
+        python-version-file: '.python-version'
 
     - name: Install uv
       uses: astral-sh/setup-uv@681c641aba71e4a1c380be3ab5e12ad51f415867 # v7.1.6
