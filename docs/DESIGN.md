@@ -334,7 +334,7 @@ project bound to a single EF project.
 ### 5.1 Technology Stack
 
 - **Web Framework**: FastAPI (modern, has built-in model validation and API documentation)
-- **Database**: PostgreSQL with SQLAlchemy ORM, `psycopg2`, and Alembic for schema migrations
+- **Database**: PostgreSQL with SQLAlchemy ORM, `psycopg` (v3), and Alembic for schema migrations
 - **HTTP Client**: `requests` for OIDC discovery and DependencyTrack API calls
 - **JWT Library**: `PyJWT` with `cryptography` support
   - Handles token parsing, validation, and signature verification

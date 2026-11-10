@@ -31,7 +31,7 @@ updates:
     open-pull-requests-limit: 10
     ignore:
       # Python minor bumps must move .python-version along (enforced in CI)
-      # and wait for wheels of compiled deps (e.g. psycopg2-binary), so they
+      # and wait for wheels of compiled deps (e.g. psycopg-binary), so they
       # are done by hand; patch bumps stay automatic.
       - dependency-name: "python"
         update-types:

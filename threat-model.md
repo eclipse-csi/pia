@@ -400,7 +400,7 @@ or `PyJWKClient` without caps) is in-model.
 | requests, urllib3, certifi | TLS certificate verification by default; `allow_redirects=False` honoured; `timeout` as a per-read gap; `read1` returning after one socket read *(documented, `pia/oidc.py` `_fetch_json` docstring)* | upstream |
 | FastAPI, Starlette, pydantic | Body and header parsing, 422 generation, running `def` handlers in the threadpool, middleware order *(documented, DESIGN.md §5.1)* | upstream |
 | uvicorn, h11 | HTTP/1.1 parsing, header and line limits, keep-alive; request-smuggling resistance *(documented, DESIGN.md §8.1 "Production ASGI server (e.g., uvicorn)")* | upstream |
-| SQLAlchemy, psycopg2 | Parameterized queries, pooling with `pool_pre_ping` *(documented, CHANGELOG 0.6.0 "DB connection loss")* | upstream |
+| SQLAlchemy, psycopg | Parameterized queries, pooling with `pool_pre_ping` *(documented, CHANGELOG 0.6.0 "DB connection loss")* | upstream |
 | Alembic | Migration execution under the migration credentials *(documented, README "Database Migration")* | upstream |
 | pydantic-settings | `PIA_*` environment parsing *(documented, DESIGN.md §4.2)* | upstream |
 | click, PyYAML, prometheus-client | CLI parsing; `safe_load`; registry and text exposition *(documented, DESIGN.md §5.1)* | upstream |
