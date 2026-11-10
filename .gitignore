@@ -41,3 +41,6 @@ htmlcov/
 
 # PIA specific
 *.log
+
+# Threat-model producer-side artifacts (backtest corpus with advisory URLs)
+.threat-model/

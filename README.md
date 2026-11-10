@@ -14,7 +14,8 @@ purpose of uploading SBOMs to the Eclipse Foundation DependencyTrack instance.
 > other words, the workload authenticates and establishes the EF-project scope, and
 > `product_name` selects the target within that scope.
 
-See [Design Document](docs/DESIGN.md) for details.
+See [Design Document](docs/DESIGN.md) for details and the
+[threat model](threat-model.md) for PIA's security contract.
 
 ## Contributing
 
