@@ -1,7 +1,7 @@
 # threat-model.yaml — derived index; the prose threat model is canonical.
 schema: threat-model-sidecar/v2
 project: pia
-prose_version: "threat-model.md@sha256:fc66256ade1e3dae494a5be1f79e4eab283aec4d0e28e419c7a1d8d263712387"
+prose_version: "threat-model.md@sha256:f99bf6048cce6119e63bc2720edd435d5722091813dc31da13e9bd4fb92e8c37"
 model_status: accepted
 triage_policy: strict
 confidence: {documented: 166, maintainer: 26, inferred: 0, assumption: 0}
@@ -477,7 +477,7 @@ dependencies:
     covered_here: false
     violation_disposition: "OUT-OF-MODEL: dependency-contract"
     provenance: {kind: documented, source: "CHANGELOG 0.6.0 DB connection loss"}
-  - name: psycopg2-binary
+  - name: psycopg
     relied_on_for: "PostgreSQL driver and parameter binding"
     relied_on_properties: [parameterized-queries]
     caller_obligations_acknowledged: []
@@ -485,7 +485,7 @@ dependencies:
     outputs_consumed: []
     covered_here: false
     violation_disposition: "OUT-OF-MODEL: dependency-contract"
-    provenance: {kind: documented, source: "DESIGN.md §5.1 psycopg2"}
+    provenance: {kind: documented, source: "DESIGN.md §5.1 psycopg"}
   - name: alembic
     relied_on_for: "migration execution under the migration credentials"
     relied_on_properties: [migration-execution]
