@@ -7,7 +7,7 @@ import uuid
 from collections.abc import Awaitable, Callable
 from contextlib import asynccontextmanager
 from contextvars import ContextVar
-from typing import Annotated, NoReturn
+from typing import Annotated, Any, NoReturn
 
 import jwt
 from fastapi import Depends, FastAPI, Header, HTTPException, Request, Response, status
@@ -270,7 +270,8 @@ def authenticate(
             token,
             options=dict(verify_signature=False, require=["iss"]),
         )
-        unverified_issuer: str = unverified_claims["iss"]
+        # Unverified, may be any JSON type; is_issuer_known checks it
+        unverified_issuer: Any = unverified_claims["iss"]
     except jwt.PyJWTError as e:
         logger.warning(f"Token decode failed: {e!a}")
         _401("Invalid token", "invalid_token")
@@ -366,8 +367,8 @@ def upload_sbom(
             f"No DependencyTrack project {payload.product_name!a} found for "
             f"ef_project_id '{workload.ef_project_id}'"
         )
-        # The requested product_name is caller-controlled and unvalidated at
-        # this point, so it must not become a label value.
+        # The requested product_name is caller-chosen and matched no registered
+        # project, so it must not become a label value (unbounded cardinality).
         _record_upload(workload, metrics.UNREGISTERED_PRODUCT, "no_dt_project")
         _401("No matching DependencyTrack project found", "no_dt_project")
 

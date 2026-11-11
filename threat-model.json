@@ -2,11 +2,11 @@
   "spec_version": 1,
   "repository": "https://github.com/eclipse-csi/pia",
   "commit": "972572be73e28a8982e089b1d60e11025fe716cc",
-  "date": "2026-11-09",
+  "date": "2026-11-11",
   "scope_subpath": null,
   "description": "PIA is the Eclipse Foundation's OIDC authentication broker for SBOM uploads to DependencyTrack. A CI job (GitHub Actions or a registered Jenkins pipeline) posts an SBOM with a short-lived OIDC token; PIA verifies the token against the allowlisted issuer's JWKS, maps the verified identity to a registered Eclipse Foundation project, and relays the SBOM to that project's DependencyTrack target with PIA's own API key. It runs as one uvicorn worker per pod behind a TLS-terminating, rate-limiting reverse proxy; operators manage registrations with the `pia sync` CLI from a curated YAML file.",
   "confidence": {
-    "documented": 192,
+    "documented": 203,
     "inferred": 0
   },
   "components": [
@@ -135,10 +135,10 @@
       "entry_point": "POST /v1/upload/sbom",
       "parameter": "unverified JWT iss claim",
       "attacker_controllable": "yes",
-      "caller_must_enforce": "none — P-ISSUER-PIN",
+      "caller_must_enforce": "none — must be a printable string before the database lookup, else 401 (P-ERRORS); P-ISSUER-PIN",
       "component": "auth",
       "provenance": "documented",
-      "source": "DESIGN.md §3.1.1 step 2"
+      "source": "DESIGN.md §3.1.1 step 2; CHANGELOG [Unreleased] untrusted input sanitization"
     },
     {
       "entry_point": "POST /v1/upload/sbom",
@@ -154,7 +154,7 @@
       "parameter": "verified claims (aud, exp, iat, repository, repository_owner_id, event_name)",
       "attacker_controllable": "conditional",
       "condition": "only a registered issuer can sign them; the triggering actor chooses event_name, ref and similar within what the issuer allows",
-      "caller_must_enforce": "none — P-SIG, P-WORKLOAD-BIND",
+      "caller_must_enforce": "none — P-SIG, P-WORKLOAD-BIND; repository and repository_owner_id must be printable strings before the lookup (P-ERRORS)",
       "component": "auth",
       "provenance": "documented",
       "source": "DESIGN.md §3.1.1 steps 5–6"
@@ -192,7 +192,7 @@
       "entry_point": "POST /v1/upload/sbom [body]",
       "parameter": "product_name",
       "attacker_controllable": "yes",
-      "caller_must_enforce": "none — P-WORKLOAD-BIND",
+      "caller_must_enforce": "none — strict non-empty printable string, else 422 (P-ERRORS), so a registered name matches only if printable (register-printable-names); P-WORKLOAD-BIND",
       "component": "upload-relay",
       "provenance": "documented",
       "source": "README authorization note"
@@ -201,7 +201,7 @@
       "entry_point": "POST /v1/upload/sbom [body]",
       "parameter": "product_version, is_latest",
       "attacker_controllable": "yes",
-      "caller_must_enforce": "DependencyTrack validates; PIA relays verbatim (D-SBOM-VALIDATION)",
+      "caller_must_enforce": "strict types (non-empty printable string, boolean), else 422 (P-ERRORS); DependencyTrack validates; PIA relays verbatim (D-SBOM-VALIDATION)",
       "component": "upload-relay",
       "provenance": "documented",
       "source": "DESIGN.md §3.1 step 6"
@@ -429,7 +429,7 @@
     },
     {
       "property": "P-WORKLOAD-BIND",
-      "conditions": "verified claims match exactly one registered workload; GitHub event_name in {push, workflow_dispatch, release, schedule}; product_name resolved only within the workload's ef_project_id; registrations are operator input",
+      "conditions": "verified claims match exactly one registered workload; GitHub event_name a string in {push, workflow_dispatch, release, schedule}; product_name resolved only within the workload's ef_project_id; registrations are operator input",
       "violation_symptom": "integrity-bypass",
       "severity_tier": "security",
       "provenance": "documented",
@@ -461,11 +461,11 @@
     },
     {
       "property": "P-ERRORS",
-      "conditions": "malformed POST data yields 422 without echoing the body; token problems yield 401; DependencyTrack failure yields 502 or the relayed status; an unhandled 500 on malformed unauthenticated input is a bug, not a vulnerability (maintainer ruling 2026-10)",
+      "conditions": "malformed POST data (wrong JSON type, empty or non-printable product_name/product_version) yields 422 without echoing the body; token problems, including a malformed iss or workload-matching claims that are not printable strings or a non-string event_name, yield 401; DependencyTrack failure yields 502 or the relayed status; unprintable text (NUL, lone surrogates, other control characters) never reaches a database query, before or after authentication (maintainer 2026-11); an unhandled 500 on malformed unauthenticated input is a bug, not a vulnerability (maintainer ruling 2026-10)",
       "violation_symptom": "crash",
       "severity_tier": "correctness",
       "provenance": "documented",
-      "source": "DESIGN.md §5.3; CHANGELOG 0.9.0 #109, #110"
+      "source": "DESIGN.md §5.3; CHANGELOG 0.9.0 #109, #110; CHANGELOG [Unreleased] untrusted input sanitization"
     },
     {
       "property": "P-METRIC-CARD",
@@ -524,10 +524,10 @@
     },
     {
       "property": "D-SBOM-VALIDATION",
-      "reason": "authenticated workloads; PIA neither parses the SBOM nor bounds the body; DependencyTrack and the proxy do",
-      "false_friend": false,
+      "reason": "authenticated workloads; PIA checks only that product_name and product_version are non-empty printable strings; it caps no field length and never parses or validates bom, including NUL or lone-surrogate escapes inside it; DependencyTrack and the proxy do",
+      "false_friend": true,
       "provenance": "documented",
-      "source": "DESIGN.md §3.1 step 3; issue #111"
+      "source": "maintainer ruling, 2026-11"
     },
     {
       "property": "D-PRODUCT-LEAST-PRIV",
@@ -638,6 +638,7 @@
     "keep a reverse proxy in front that terminates TLS, rate-limits, and caps the request body",
     "do not route /metrics publicly",
     "use an https:// DependencyTrack URL in production",
+    "register printable DependencyTrack product names; PIA rejects a product_name with control or format characters or a separator other than the ASCII space with 422, so such a name can never receive an upload",
     "use a database URL with TLS where the network is not trusted",
     "scope the DependencyTrack API key to what each caller needs and rotate it",
     "run migrations as a separate job with migration credentials; give the app a read-only database user",
