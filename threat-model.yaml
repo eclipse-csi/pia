@@ -1,13 +1,13 @@
 # threat-model.yaml — derived index; the prose threat model is canonical.
 schema: threat-model-sidecar/v2
 project: pia
-prose_version: "threat-model.md@sha256:f99bf6048cce6119e63bc2720edd435d5722091813dc31da13e9bd4fb92e8c37"
+prose_version: "threat-model.md@sha256:dc01c541bb2cdec39e7d33d19c6ec1b3bd1f4892d69ed28264d50c89969c691e"
 model_status: accepted
 triage_policy: strict
-confidence: {documented: 166, maintainer: 26, inferred: 0, assumption: 0}
+confidence: {documented: 172, maintainer: 31, inferred: 0, assumption: 0}
 
 generation:
-  model: "Claude Fable 5.1 (claude-fable-5-1)"
+  model: "Claude Fable 5.1 (claude-fable-5-1); 2026-11-11 revision: Claude Opus 5.5 (claude-opus-5-5)"
   effort: medium
   plugins:
     - threat-model
@@ -68,8 +68,8 @@ entry_points:
       - name: unverified JWT iss claim
         attacker_controllable: true
         control_kinds: [resource-name]
-        caller_must_enforce: "none — P-ISSUER-PIN"
-        provenance: {kind: documented, source: "DESIGN.md §3.1.1 step 2"}
+        caller_must_enforce: "none — must be a printable string before the database lookup, else 401 (P-ERRORS); P-ISSUER-PIN"
+        provenance: {kind: documented, source: "DESIGN.md §3.1.1 step 2; CHANGELOG [Unreleased] untrusted input sanitization"}
       - name: JWT header kid and alg
         attacker_controllable: true
         control_kinds: [data, type-class]
@@ -78,7 +78,7 @@ entry_points:
       - name: verified claims (aud, exp, iat, repository, repository_owner_id, event_name)
         attacker_controllable: true
         control_kinds: [data]
-        caller_must_enforce: "none — P-SIG, P-WORKLOAD-BIND"
+        caller_must_enforce: "none — P-SIG, P-WORKLOAD-BIND; repository and repository_owner_id must be printable strings before the lookup (P-ERRORS)"
         provenance: {kind: documented, source: "DESIGN.md §3.1.1 steps 5–6"}
       - name: Content-Type, malformed or non-UTF-8 body
         attacker_controllable: true
@@ -101,13 +101,13 @@ entry_points:
       - name: product_name
         attacker_controllable: true
         control_kinds: [resource-name]
-        caller_must_enforce: "none — P-WORKLOAD-BIND"
+        caller_must_enforce: "none — strict non-empty printable string, else 422 (P-ERRORS), so a registered name matches only if printable (register-printable-names); P-WORKLOAD-BIND"
         provenance: {kind: documented, source: "README authorization note"}
       - name: product_version, is_latest
         attacker_controllable: true
         control_kinds: [data]
         obligation_id: validate-sbom-at-dt
-        caller_must_enforce: "DependencyTrack validates; PIA relays verbatim (D-SBOM-VALIDATION)"
+        caller_must_enforce: "strict types (non-empty printable string, boolean), else 422 (P-ERRORS); DependencyTrack validates; PIA relays verbatim (D-SBOM-VALIDATION)"
         provenance: {kind: documented, source: "DESIGN.md §3.1 step 6"}
       - name: bom (base64 CycloneDX)
         attacker_controllable: true
@@ -199,7 +199,7 @@ entry_points:
         provenance: {kind: documented, source: "DESIGN.md §4.2"}
 
 contract_dimensions:
-  - {component: auth, dimension: numeric-domain, status: claimed, conditions: "issuer responses ≤ 1 MiB decoded; exp/iat checked as numbers; iss must be a string", property_id: P-ISSUER-BOUND, provenance: {kind: documented, source: "DESIGN.md §3.1.1 step 3; CHANGELOG 0.9.0 #109"}}
+  - {component: auth, dimension: numeric-domain, status: claimed, conditions: "issuer responses ≤ 1 MiB decoded; exp/iat checked as numbers; iss must be a printable string before the database lookup", property_id: P-ISSUER-BOUND, provenance: {kind: documented, source: "DESIGN.md §3.1.1 step 3; CHANGELOG 0.9.0 #109"}}
   - {component: auth, dimension: failure-atomicity, status: not-applicable, conditions: "no state is mutated; every request is independent and the database is read-only for the app", provenance: {kind: documented, source: "README runtime database user only needs read access"}}
   - {component: auth, dimension: recursive-cyclic-topology, status: not-applicable, conditions: "inputs are flat JSON documents; nesting depth is the runtime JSON parser's contract (§1.9)", provenance: {kind: documented, source: "DESIGN.md §5.1 PyJWT entry"}}
   - {component: auth, dimension: callback-execution, status: claimed, conditions: "the issuer's jwks_uri is followed only under the issuer URL; no redirects", property_id: P-ISSUER-PIN, provenance: {kind: documented, source: "CHANGELOG 0.9.0 #113"}}
@@ -207,7 +207,7 @@ contract_dimensions:
   - {component: auth, dimension: reference-lifecycle, status: disclaimed, conditions: "a token is accepted any number of times until exp; no jti tracking", property_id: D-REPLAY, provenance: {kind: documented, source: "DESIGN.md §10 Protect against replayed tokens"}}
   - {component: auth, dimension: concurrency-reentrancy, status: claimed, conditions: "a slow issuer holds one threadpool worker; about 40 concurrent slow requests exhaust the pool", property_id: P-NO-STALL, provenance: {kind: documented, source: "PR #112 description About 40 such requests"}}
   - {component: auth, dimension: resource-complexity, status: disclaimed, conditions: "per request up to two outbound fetches, each 10 s per read and 1 MiB; no cap on request volume and no bound on total time against a trickling issuer", property_id: D-RATE-LIMIT, provenance: {kind: documented, source: "DESIGN.md §8.3 rate limiting at the reverse proxy; §10 slow retrieval"}}
-  - {component: upload-relay, dimension: numeric-domain, status: disclaimed, conditions: "no size cap on bom; the binding limit is DependencyTrack's 20,000,000-character cap and the proxy's body limit", property_id: D-SBOM-VALIDATION, provenance: {kind: documented, source: "issue #111 The binding limit today is DT's"}}
+  - {component: upload-relay, dimension: numeric-domain, status: disclaimed, conditions: "no length cap on bom, product_name or product_version; the binding limits are DependencyTrack's 20,000,000-character cap and the proxy's body limit; the two name fields must only be non-empty and printable", property_id: D-SBOM-VALIDATION, provenance: {kind: maintainer, date: "2026-11"}}
   - {component: upload-relay, dimension: failure-atomicity, status: disclaimed, conditions: "a 500 or 502 does not mean the SBOM was not stored; retry may duplicate it", property_id: D-EXTERNAL-ATOMICITY, provenance: {kind: documented, source: "pia/main.py upload_sbom comment a retry is NOT safe"}}
   - {component: upload-relay, dimension: recursive-cyclic-topology, status: not-applicable, conditions: "the body schema is four flat fields; the SBOM is an opaque string", provenance: {kind: documented, source: "DESIGN.md §4.1 request body"}}
   - {component: upload-relay, dimension: callback-execution, status: disclaimed, conditions: "DependencyTrack's response is relayed verbatim; PIA does not sanitize it", property_id: D-DT-RESPONSE, provenance: {kind: documented, source: "DESIGN.md §4.1 verbatim"}}
@@ -571,11 +571,11 @@ properties_claimed:
   - {id: P-SIG, kind: authentication, components: [auth], tier: security-critical, conditions: "RS256 only; key fetched per request from the allowlisted issuer's JWKS, kid match, use sig or absent; aud equals PIA_EXPECTED_AUDIENCE; exp unexpired; iat present", violation_symptoms: [integrity-bypass], provenance: {kind: documented, source: "DESIGN.md §3.1.1 steps 3–4"}}
   - {id: P-ISSUER-PIN, kind: x-outbound-confinement, components: [auth], tier: security-critical, conditions: "iss equals the GitHub issuer or a registered Jenkins issuer; jwks_uri under {iss}/ with unreserved characters and no dot segments; no redirects; HTTP 200 only", violation_symptoms: [x-outbound-request-to-unlisted-host], provenance: {kind: documented, source: "DESIGN.md §3.1.1 steps 2–3; CHANGELOG 0.6.0 #84 and 0.9.0 #113"}}
   - {id: P-ISSUER-BOUND, kind: resource-bound, components: [auth], tier: security-critical, conditions: "each discovery and JWKS response: 10 s per read, 1 MiB decoded cap, 10 s deadline checked between reads; total wall time is not bounded (D-SLOW-RETRIEVAL)", violation_symptoms: [unbounded-allocation], provenance: {kind: documented, source: "DESIGN.md §3.1.1 step 3"}}
-  - {id: P-WORKLOAD-BIND, kind: integrity, components: [auth, upload-relay], tier: security-critical, conditions: "verified claims match exactly one registered workload; GitHub event_name in {push, workflow_dispatch, release, schedule}; product_name resolved only within the workload's ef_project_id; registrations are operator input", violation_symptoms: [integrity-bypass], provenance: {kind: documented, source: "README authorization note; DESIGN.md §3.1.1 steps 5–6 and §4.3"}}
+  - {id: P-WORKLOAD-BIND, kind: integrity, components: [auth, upload-relay], tier: security-critical, conditions: "verified claims match exactly one registered workload; GitHub event_name a string in {push, workflow_dispatch, release, schedule}; product_name resolved only within the workload's ef_project_id; registrations are operator input", violation_symptoms: [integrity-bypass], provenance: {kind: documented, source: "README authorization note; DESIGN.md §3.1.1 steps 5–6 and §4.3"}}
   - {id: P-NO-STALL, kind: availability, components: [auth, upload-relay, ops-endpoints], tier: security-critical, conditions: "fewer than about 40 concurrent slow requests; DependencyTrack call has 5 s connect and 30 s read timeouts", violation_symptoms: [hang], provenance: {kind: documented, source: "CHANGELOG 0.9.0 #112; PR #112 description"}}
   - {id: P-LOG-ESCAPE, kind: output-sanitization, components: [auth, ops-endpoints], tier: security-critical, conditions: "values logged before the signature check passes (unverified iss, decode and verification errors) are escaped with !a; request ID server-generated; token and API key never logged", violation_symptoms: [x-log-forgery, info-leak], provenance: {kind: documented, source: "CHANGELOG 0.3.0 #60"}}
   - {id: P-LOG-ESCAPE-AUTHED, kind: output-sanitization, components: [auth, upload-relay], tier: correctness-only, conditions: "values logged after a token verified for a registered workload (claims summary, product_name, product_version, DependencyTrack body) are escaped with !a; the fixed line text names the caller's real ef_project_id", violation_symptoms: [x-log-forgery], provenance: {kind: maintainer, date: "2026-10"}}
-  - {id: P-ERRORS, kind: correctness, components: [auth, upload-relay], tier: correctness-only, conditions: "malformed POST data yields 422 without echoing the body; token problems yield 401; DependencyTrack failure yields 502 or the relayed status; an unhandled 500 on malformed unauthenticated input is a bug, not a vulnerability (maintainer ruling 2026-10)", violation_symptoms: [crash], provenance: {kind: documented, source: "DESIGN.md §5.3; CHANGELOG 0.9.0 #109, #110"}}
+  - {id: P-ERRORS, kind: correctness, components: [auth, upload-relay], tier: correctness-only, conditions: "malformed POST data (wrong JSON type, empty or non-printable product_name/product_version) yields 422 without echoing the body; token problems, including a malformed iss or workload-matching claims that are not printable strings or a non-string event_name, yield 401; DependencyTrack failure yields 502 or the relayed status; unprintable text (NUL, lone surrogates, other control characters) never reaches a database query, before or after authentication (maintainer 2026-11); an unhandled 500 on malformed unauthenticated input is a bug, not a vulnerability (maintainer ruling 2026-10)", violation_symptoms: [crash], provenance: {kind: documented, source: "DESIGN.md §5.3; CHANGELOG 0.9.0 #109, #110; CHANGELOG [Unreleased] untrusted input sanitization"}}
   - {id: P-METRIC-CARD, kind: resource-bound, components: [ops-endpoints], tier: security-critical, conditions: "method collapses to a fixed set, path is the route template or <unmatched>, reason/outcome are Literal, product_name labeled only after resolving to a database row", violation_symptoms: [unbounded-allocation], provenance: {kind: documented, source: "DESIGN.md §5.4 Label cardinality"}}
   - {id: P-OUTBOUND-TLS, kind: confidentiality, components: [auth, upload-relay, operator-tooling], tier: security-critical, conditions: "issuer URLs are HTTPS by construction; requests verifies certificates by default; DependencyTrack URL is https (an http URL is dev-only, §1.6)", violation_symptoms: [info-leak], provenance: {kind: maintainer, date: "2026-11"}}
   - {id: P-SBOM-OPAQUE, kind: correctness, components: [upload-relay], tier: correctness-only, conditions: "bom relayed byte-identical and never decoded", violation_symptoms: [wrong-output], provenance: {kind: documented, source: "DESIGN.md §3.1 step 3"}}
@@ -585,7 +585,7 @@ properties_disclaimed:
   - {id: D-REPLAY, components: [auth], conditions: "within the token's lifetime; no jti tracking; stated limit, not silence", tier: security-critical, false_friend: false, provenance: {kind: documented, source: "issue #9; DESIGN.md §10 Protect against replayed tokens"}}
   - {id: D-SLOW-RETRIEVAL, components: [auth], conditions: "requires control of a registered issuer; availability only; accepted risk; the 10 s TIMEOUT is per read, not a total deadline", tier: security-critical, false_friend: true, provenance: {kind: documented, source: "DESIGN.md §10 PIA currently does not prevent slow retrieval attacks; PR #112 description accepted risk"}}
   - {id: D-RATE-LIMIT, components: [auth, upload-relay, ops-endpoints], conditions: "the reverse proxy owns rate limiting; every unauthenticated request may cost two outbound fetches and a database query", tier: security-critical, false_friend: false, provenance: {kind: documented, source: "DESIGN.md §8.1 Reverse proxy for TLS termination and rate limiting; §8.3 Rate limiting per project/IP at reverse proxy level"}}
-  - {id: D-SBOM-VALIDATION, components: [upload-relay], conditions: "authenticated workloads; PIA neither parses the SBOM nor bounds the body; DependencyTrack and the proxy do", tier: security-critical, false_friend: false, provenance: {kind: documented, source: "DESIGN.md §3.1 step 3; issue #111"}}
+  - {id: D-SBOM-VALIDATION, components: [upload-relay], conditions: "authenticated workloads; PIA checks only that product_name and product_version are non-empty printable strings; it caps no field length and never parses or validates bom, including NUL or lone-surrogate escapes inside it; DependencyTrack and the proxy do", tier: security-critical, false_friend: true, provenance: {kind: maintainer, date: "2026-11"}}
   - {id: D-PRODUCT-LEAST-PRIV, components: [auth, upload-relay], conditions: "within one EF project; any registered workload may publish to every product of that EF project", tier: security-critical, false_friend: false, provenance: {kind: documented, source: "README authorization note; issue #39 decision Option A"}}
   - {id: D-EVENT-SEMANTICS, components: [auth], conditions: "maintainer-triggered events in a registered repository; only event_name is checked, not ref, workflow file, actor, environment or SHA", tier: security-critical, false_friend: false, provenance: {kind: documented, source: "DESIGN.md §3.1.1 step 6 lists the one check"}}
   - {id: D-JENKINS-JOB, components: [auth], conditions: "registered Jenkins instances; any job that can bind the id-token credential; sub is not checked", tier: security-critical, false_friend: false, provenance: {kind: documented, source: "DESIGN.md §7.2 No additional claims required; §3.1.1 Jenkins: no additional checks"}}
@@ -604,6 +604,7 @@ downstream_responsibilities:
   - {id: proxy-in-front, component: auth, statement: "keep a reverse proxy in front that terminates TLS, rate-limits, and caps the request body", enforces: [D-RATE-LIMIT, D-INBOUND-TLS, proxy-body-cap], provenance: {kind: documented, source: "DESIGN.md §8.1; issue #111"}}
   - {id: private-metrics, component: ops-endpoints, statement: "do not route /metrics publicly", enforces: [D-METRICS-AUTH, metrics-private], provenance: {kind: documented, source: "DESIGN.md §4.1"}}
   - {id: https-dependencytrack-url, component: upload-relay, statement: "use an https:// DependencyTrack URL in production", enforces: [P-OUTBOUND-TLS], provenance: {kind: maintainer, date: "2026-11"}}
+  - {id: register-printable-names, component: operator-tooling, statement: "register printable DependencyTrack product names; PIA rejects a product_name with control or format characters or a separator other than the ASCII space with 422, so such a name can never receive an upload", enforces: [curate-authorization-file], provenance: {kind: maintainer, date: "2026-11"}}
   - {id: database-transport-tls, component: operator-tooling, statement: "use a database URL with TLS where the network is not trusted", enforces: [D-DB-TRANSPORT], provenance: {kind: maintainer, date: "2026-11"}}
   - {id: scope-dependencytrack-api-key, component: upload-relay, statement: "scope the DependencyTrack API key to what each caller needs and rotate it", enforces: [protect-operator-secrets], provenance: {kind: documented, source: "pia/cli.py module docstring"}}
   - {id: separate-migration-credentials, component: operator-tooling, statement: "run migrations as a separate job with migration credentials; give the app a read-only database user", enforces: [run-migrations-out-of-band], provenance: {kind: documented, source: "README Database Migration"}}

@@ -80,6 +80,22 @@ class TestIsIssuerKnown:
     def test_non_string_issuer_unknown(self, seed_db, issuer):
         assert not is_issuer_known(seed_db, issuer)
 
+    @pytest.mark.parametrize(
+        "issuer",
+        [
+            # Text the database driver cannot encode; must not reach the query.
+            "https://ci.eclipse.org/\x00",
+            "https://ci.eclipse.org/eclipse-other\x00/oidc",
+            "https://ci.eclipse.org/\ud800",
+            "https://ci.eclipse.org/eclipse-other\ud800/oidc",
+            # Control characters
+            "https://ci.eclipse.org/eclipse-other/oidc\n",
+            "https://ci.eclipse.org/eclipse-other\x1b/oidc",
+        ],
+    )
+    def test_malformed_issuer_unknown(self, seed_db, issuer):
+        assert not is_issuer_known(seed_db, issuer)
+
 
 class TestFindWorkloadByClaims:
     def test_github_match(self, seed_db):
@@ -127,6 +143,27 @@ class TestFindWorkloadByClaims:
         workload = find_workload_by_claims(seed_db, {"iss": GITHUB_ISSUER})
         assert workload is None
 
+    @pytest.mark.parametrize(
+        "claims",
+        [
+            # Text the database driver cannot encode
+            {"repository": "eclipse-test/repo\x00", "repository_owner_id": "42"},
+            {"repository": "eclipse-test/repo\ud800", "repository_owner_id": "42"},
+            {"repository": "eclipse-test/repo", "repository_owner_id": "42\x00"},
+            {"repository": "eclipse-test/repo", "repository_owner_id": "42\ud800"},
+            # Control characters
+            {"repository": "eclipse-test/repo\n", "repository_owner_id": "42"},
+            {"repository": "eclipse-test/repo", "repository_owner_id": "42\x1b"},
+            # Wrong type or missing
+            {"repository": ["eclipse-test/repo"], "repository_owner_id": "42"},
+            {"repository": "eclipse-test/repo", "repository_owner_id": 42},
+            {"repository": "eclipse-test/repo"},
+        ],
+    )
+    def test_github_malformed_claims(self, seed_db, claims):
+        workload = find_workload_by_claims(seed_db, {"iss": GITHUB_ISSUER, **claims})
+        assert workload is None
+
     def test_jenkins_match(self, seed_db):
         workload = find_workload_by_claims(
             seed_db,
@@ -134,6 +171,18 @@ class TestFindWorkloadByClaims:
         )
         assert isinstance(workload, JenkinsWorkload)
         assert workload.ef_project_id == "eclipse-other"
+
+    @pytest.mark.parametrize(
+        "issuer",
+        [
+            "https://ci.eclipse.org/eclipse-other\x00/oidc",
+            "https://ci.eclipse.org/eclipse-other\ud800/oidc",
+            "https://ci.eclipse.org/eclipse-other/oidc\n",
+        ],
+    )
+    def test_jenkins_malformed_issuer(self, seed_db, issuer):
+        workload = find_workload_by_claims(seed_db, {"iss": issuer})
+        assert workload is None
 
     def test_jenkins_no_match(self, seed_db):
         workload = find_workload_by_claims(
@@ -181,6 +230,11 @@ class TestVerifyWorkloadClaims:
         reason = verify_workload_claims(github_workload, {})
         assert reason is not None
         assert "None" in reason
+
+    @pytest.mark.parametrize("value", [["push"], {"push": 1}, 1])
+    def test_non_string_event_name(self, github_workload, value):
+        # Unhashable values must not raise on the frozenset lookup
+        assert verify_workload_claims(github_workload, {"event_name": value})
 
     def test_jenkins_not_checked(self, jenkins_workload):
         # No event_name check for Jenkins; any claims dict passes.
@@ -289,6 +343,31 @@ class TestUploadSBOMPayload:
         valid_request_data[field] = value
         with pytest.raises(ValidationError):
             PiaUploadPayload(**valid_request_data)
+
+    @pytest.mark.parametrize(
+        "field,value",
+        [
+            ("product_name", "test-product\x00"),
+            ("product_name", "test-product\ud800"),
+            ("product_name", "test\nproduct"),
+            ("product_name", ""),
+            ("product_version", "1.0\x00"),
+            ("product_version", "1.0\ud800"),
+            ("product_version", "1.0\x1b[2J"),
+            ("product_version", ""),
+            ("product_name", b"test-product"),
+            ("is_latest", 1),
+            ("is_latest", "true"),
+        ],
+    )
+    def test_malformed_value(self, valid_request_data, field, value):
+        valid_request_data[field] = value
+        with pytest.raises(ValidationError):
+            PiaUploadPayload(**valid_request_data)
+
+    def test_printable_non_ascii_allowed(self, valid_request_data):
+        valid_request_data["product_name"] = "prodüct Ω"
+        assert PiaUploadPayload(**valid_request_data).product_name == "prodüct Ω"
 
 
 class TestDependencyTrackPayload:

@@ -1,9 +1,9 @@
 """ORM models for projects/workloads/products and Pydantic request models."""
 
 import logging
-from typing import Any
+from typing import Annotated, Any, TypeGuard
 
-from pydantic import BaseModel, ConfigDict, Field, HttpUrl
+from pydantic import AfterValidator, BaseModel, ConfigDict, Field, HttpUrl
 from sqlalchemy import ForeignKey, MetaData, Select, String, UniqueConstraint, select
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column
 
@@ -38,6 +38,20 @@ Restricts the OIDC mint to events that only a maintainer can cause: `push`,
 file. Excludes triggers like `pull_request_target`, `workflow_run`, and
 `issue_comment` that can be indirectly driven by non-maintainers. Relax on
 demand."""
+
+
+def is_printable_str(value: Any) -> TypeGuard[str]:
+    """True for a str that is entirely printable (`str.isprintable`).
+
+    This excludes control characters, NUL and lone surrogates, but also other
+    non-printable characters such as format characters (e.g. zero-width joiner,
+    soft hyphen) and separators other than ASCII space (e.g. no-break space).
+
+    Untrusted text (token claims, payload fields) must pass this before it is
+    compared or bound into a query: the db driver cannot encode NUL or lone
+    surrogates and would raise.
+    """
+    return isinstance(value, str) and value.isprintable()
 
 
 NAMING_CONVENTION = {
@@ -243,14 +257,15 @@ class DependencyTrackProject(Base):
         )
 
 
-def is_issuer_known(session: Session, issuer: str) -> bool:
+def is_issuer_known(session: Session, issuer: object) -> bool:
     """Check if issuer is known to PIA.
 
     GitHub: issuer must equal GITHUB_ISSUER
     Jenkins: issuer must equal the issuer of a registered JenkinsWorkload in DB
     """
-    # The issuer comes from an unverified token and may be any JSON type
-    if not isinstance(issuer, str):
+    # The issuer comes from an unverified token and may be any JSON type, or
+    # text the db driver cannot encode
+    if not is_printable_str(issuer):
         return False
 
     if issuer == GITHUB_ISSUER:
@@ -279,20 +294,29 @@ def find_workload_by_claims(
 
     stmt: Select[Any]
     if issuer == GITHUB_ISSUER:
-        repository = token_claims.get("repository", "")
-        if "/" not in repository:
+        repository = token_claims.get("repository")
+        repo_owner_id = token_claims.get("repository_owner_id")
+        if (
+            not is_printable_str(repository)
+            or "/" not in repository
+            or not is_printable_str(repo_owner_id)
+        ):
             logger.info(
-                f"GitHub token missing or malformed 'repository' claim: {repository!a}"
+                f"GitHub token missing or malformed 'repository' or "
+                f"'repository_owner_id' claim: "
+                f"{repository!a}, {repo_owner_id!a}"
             )
             return None
         repo_owner, repo_name = repository.split("/", 1)
-        repo_owner_id = token_claims.get("repository_owner_id")
         stmt = select(GitHubWorkload).where(
             GitHubWorkload.repo_owner == repo_owner,
             GitHubWorkload.repo_name == repo_name,
             GitHubWorkload.repo_owner_id == repo_owner_id,
         )
     else:
+        if not is_printable_str(issuer):
+            logger.info(f"Token has malformed Jenkins 'iss' claim: {issuer!a}")
+            return None
         stmt = select(JenkinsWorkload).where(JenkinsWorkload.issuer == issuer)
     return session.execute(stmt).scalar_one_or_none()
 
@@ -308,7 +332,10 @@ def verify_workload_claims(workload: Workload, claims: dict[str, Any]) -> str | 
     """
     if isinstance(workload, GitHubWorkload):
         event_name = claims.get("event_name")
-        if event_name not in GITHUB_ALLOWED_EVENT_NAMES:
+        # isinstance first: an unhashable claim (list, dict) would raise
+        if not isinstance(event_name, str) or (
+            event_name not in GITHUB_ALLOWED_EVENT_NAMES
+        ):
             return (
                 f"GitHub event_name {event_name!r} not in allowlist "
                 f"{sorted(GITHUB_ALLOWED_EVENT_NAMES)}"
@@ -327,16 +354,31 @@ def find_dt_project(
     return session.execute(stmt).scalar_one_or_none()
 
 
-class PiaUploadPayload(BaseModel):
-    """Payload for PIA SBOM upload."""
+def _printable(value: str) -> str:
+    # NOTE: Must not echo the value: it is untrusted and may be unencodable
+    if not is_printable_str(value):
+        raise ValueError("String should contain only printable characters")
+    return value
 
-    product_name: str
+
+PrintableStr = Annotated[str, Field(min_length=1), AfterValidator(_printable)]
+"""Non-empty, entirely printable string (see `is_printable_str`)."""
+
+
+class PiaUploadPayload(BaseModel):
+    """Payload for PIA SBOM upload.
+
+    Strict: no type coercion, and `product_name` and `product_version` must be
+    printable (see `PrintableStr`). `bom` is left to DependencyTrack to validate.
+    """
+
+    product_name: PrintableStr
     """
     Name of product for which the SBOM is produced. This field is required by
     DependencyTrack to aggregate SBOMs by product within a project.
     """
 
-    product_version: str
+    product_version: PrintableStr
     """
     Version of product for which the SBOM was produced
     """
@@ -351,7 +393,7 @@ class PiaUploadPayload(BaseModel):
     Whether this SBOM should be marked as the latest version in DependencyTrack
     """
 
-    model_config = ConfigDict(use_attribute_docstrings=True)
+    model_config = ConfigDict(strict=True, use_attribute_docstrings=True)
 
 
 class PiaUploadResponse(BaseModel):

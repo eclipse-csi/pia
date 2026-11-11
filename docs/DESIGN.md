@@ -223,7 +223,8 @@ Content-Type: application/json
   - Issuer not allowed
   - No matching workload found for token claims
   - No matching DependencyTrack project found
-- `422 Unprocessable Entity`: Missing Authorization header or invalid JSON
+- `422 Unprocessable Entity`: Missing Authorization header, invalid JSON or
+  malformed payload fields (see §5.3)
 - `502`: DependencyTrack upload request failed
 - `*`: Relay DependencyTrack status code and body verbatim (non-2xx)
 
@@ -368,10 +369,15 @@ project bound to a single EF project.
 - **Settings Errors**: Fail fast at startup with clear error
 
 - **Authentication Errors**:
-  - 422 for malformed POST data
-  - 401 for unknown issuer, token verification errors, no matching workload
-    found for verified token claims, or no matching DependencyTrack project
-    for the workload's `ef_project_id`
+  - 422 for malformed POST data: the payload model is strict (no type
+    coercion), and `product_name` and `product_version` must be non-empty and
+    printable; `bom` content is left to DependencyTrack
+  - 401 for unknown or malformed issuer, token verification errors, no
+    matching workload found for verified token claims, or no matching
+    DependencyTrack project for the workload's `ef_project_id`
+  - Token claims used for matching (`iss`, GitHub `repository` and
+    `repository_owner_id`) must be printable strings before they are compared
+    or used in a database query; a claim that is not is treated as no match
 
 - **DependencyTrack Upload Errors**: 502, if upload fails with an error, or HTTP
     status code from DependencyTrack

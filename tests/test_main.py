@@ -264,6 +264,31 @@ class TestNonStringIssuer:
         assert response.json()["detail"] == "Issuer not allowed"
 
 
+class TestMalformedIssuer:
+    """Tokens with a malformed string `iss` claim are rejected at the endpoint."""
+
+    @pytest.mark.parametrize(
+        "issuer",
+        [
+            # Text the database driver cannot encode
+            "https://ci.eclipse.org/\x00",
+            "https://ci.eclipse.org/eclipse-other\x00/oidc",
+            "https://ci.eclipse.org/\ud800",
+            "https://ci.eclipse.org/eclipse-other\ud800/oidc",
+            # Control characters
+            "https://ci.eclipse.org/eclipse-other/oidc\n",
+        ],
+    )
+    def test_issuer_not_allowed(self, client, valid_request_data, issuer):
+        response = client.post(
+            "/v1/upload/sbom",
+            json=valid_request_data,
+            headers={"Authorization": f"Bearer {_unsigned_token({'iss': issuer})}"},
+        )
+        assert response.status_code == 401
+        assert response.json()["detail"] == "Issuer not allowed"
+
+
 class TestUploadSBOMEndpoint:
     """Tests for /v1/upload/sbom endpoint, with authentication bypassed."""
 
@@ -370,7 +395,7 @@ class TestUploadSBOMEndpoint:
         caplog,
     ):
         """Successful uploads are logged, with the caller's version escaped."""
-        valid_request_data["product_version"] = "1.0\n2026 - forged\x1b[2J"
+        valid_request_data["product_version"] = "1.0-ünïcödé"
         mock_dt_response = Mock()
         mock_dt_response.ok = True
         mock_dt_response.status_code = 200
@@ -383,10 +408,29 @@ class TestUploadSBOMEndpoint:
 
         assert "SBOM uploaded" in caplog.text
         assert "dt_token='dt-token-abc'" in caplog.text
-        for record in caplog.records:
-            msg = record.getMessage()
-            assert "\n" not in msg, f"newline leaked into: {msg!r}"
-            assert "\x1b" not in msg, f"ESC leaked into: {msg!r}"
+        assert "version='1.0-\\xfcn\\xefc\\xf6d\\xe9'" in caplog.text
+
+    @patch("pia.main.dependencytrack.upload_sbom")
+    def test_bom_relayed_unvalidated(
+        self, mock_upload, client, authenticate_as_workload
+    ):
+        """PIA does not validate `bom` content; DependencyTrack does."""
+        mock_upload.return_value = Mock(
+            ok=False, status_code=400, content=b'{"detail":"bad bom"}'
+        )
+        # Raw JSON escapes: NUL, lone surrogate, not base64
+        body = (
+            r'{"product_name": "test-product", "product_version": "1.0.0", '
+            r'"bom": "x\u0000\ud800!"}'
+        )
+        response = client.post(
+            "/v1/upload/sbom",
+            content=body,
+            headers={"Content-Type": "application/json"},
+        )
+        assert response.status_code == 400
+        dt_payload = mock_upload.call_args.args[2]
+        assert dt_payload.bom == "x\x00\ud800!"
 
     def test_upload_invalid_json(self, client, authenticate_as_workload):
         """Error with invalid JSON."""
@@ -503,23 +547,58 @@ class TestNewlineEscaping:
             "expected escaped newline somewhere in captured logs"
         )
 
-    def test_control_chars_in_product_name_are_escaped(
-        self, client, valid_request_data, authenticate_as_workload, caplog
+    @pytest.mark.parametrize("field", ["product_name", "product_version"])
+    def test_control_chars_in_payload_rejected(
+        self, client, valid_request_data, authenticate_as_workload, caplog, field
     ):
-        valid_request_data["product_name"] = (
+        valid_request_data[field] = (
             "x\n2026-04-27 09:00:00,000 - pia.main - INFO - forged\x1b[2J"
         )
 
         with caplog.at_level(logging.INFO, logger="pia.main"):
             response = client.post("/v1/upload/sbom", json=valid_request_data)
-        assert response.status_code == 401
+        assert response.status_code == 422
+        assert response.json()["detail"][0]["loc"] == ["body", field]
+        assert "forged" not in response.text
 
         for record in caplog.records:
             msg = record.getMessage()
             assert "\n" not in msg, f"newline leaked into: {msg!r}"
             assert "\x1b" not in msg, f"ESC leaked into: {msg!r}"
-        assert any("\\n" in r.getMessage() for r in caplog.records)
-        assert any("\\x1b[2J" in r.getMessage() for r in caplog.records)
+
+    @pytest.mark.parametrize(
+        "field, raw",
+        [
+            # Escapes the database driver cannot encode (NUL, lone surrogate);
+            # sent raw so they reach the server as JSON escapes.
+            ("product_name", r'"test-product\u0000"'),
+            ("product_name", r'"test-product\ud800"'),
+            ("product_version", r'"1.0\u0000"'),
+            ("product_version", r'"1.0\ud800"'),
+            # Empty
+            ("product_name", '""'),
+            ("product_version", '""'),
+            # No type coercion
+            ("product_name", "1"),
+            ("product_version", "1.0"),
+            ("bom", "null"),
+            ("is_latest", "1"),
+            ("is_latest", '"true"'),
+        ],
+    )
+    def test_malformed_payload_field_rejected(
+        self, client, valid_request_data, authenticate_as_workload, field, raw
+    ):
+        """Malformed payload fields are a 422 before any lookup, not a 500."""
+        body = json.dumps(dict(valid_request_data, **{field: None}))
+        body = body.replace(f'"{field}": null', f'"{field}": {raw}')
+        response = client.post(
+            "/v1/upload/sbom",
+            content=body,
+            headers={"Content-Type": "application/json"},
+        )
+        assert response.status_code == 422
+        assert response.json()["detail"][0]["loc"] == ["body", field]
 
 
 @pytest.mark.usefixtures("setup_env")
