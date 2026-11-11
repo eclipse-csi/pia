@@ -118,3 +118,34 @@ can exercise `pia sync` end to end.
 
    Drop `--dry-run` to apply, then re-run to see an empty (idempotent) plan.
    Edit `projects.local.yaml` and re-run to see updates and deletions in the plan.
+
+#### End-to-end Tests
+
+The tests in `e2e/` run real CI jobs that upload an SBOM to the local stack,
+which is exposed via an [ngrok](https://ngrok.com) tunnel. They then check
+that the SBOM arrived in the local DependencyTrack. Currently covered:
+Eclipse GitLab, using the `pia-upload` job of
+[gitlab-id-demo](https://gitlab.eclipse.org/eclipsefdn/security/gitlab-id-demo)
+(reference copy in `e2e/gitlab-id-demo.gitlab-ci.yml`).
+
+Requirements:
+- Docker (with ~5 GB of me
+- `NGROK_AUTHTOKEN`: authtoken of a (free) ngrok account
+- `PIA_E2E_GITLAB_TOKEN`: GitLab token that can create pipelines in
+  gitlab-id-demo and read their jobs and artifacts. That is either a project
+  access token with role Developer and scope `api`, or a fine-grained personal
+  access token with the project permissions "Pipeline: Create", "Pipeline:
+  Read", "Job: Read" and "Job Artifact: Read"
+
+```shell
+NGROK_AUTHTOKEN=... PIA_E2E_GITLAB_TOKEN=... make test-e2e
+```
+
+The tests start and provision the `docker compose` stack themselves, including
+the `ngrok` service from the `e2e` profile. Note that this replaces any
+workloads synced from `projects.local.yaml` with those in
+`e2e/projects.e2e.yaml`. Tests for which credentials are missing are skipped.
+The stack keeps running afterwards. Stop it with:
+```shell
+docker compose --profile e2e down
+```

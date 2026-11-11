@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+* End-to-end test of the Eclipse GitLab integration against the local stack,
+  exposed via an ngrok tunnel (`make test-e2e`)
+
 ## [0.10.0] - 2026-11-13
 
 ### Added
