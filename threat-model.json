@@ -440,7 +440,7 @@
     },
     {
       "property": "P-WORKLOAD-BIND",
-      "conditions": "verified claims match exactly one registered workload; GitHub event_name in {push, workflow_dispatch, release, schedule}; GitLab matched on project_path and project_id (never job_project_*), so fork MR pipelines never match and a project re-created at a registered path is rejected until re-synced, against insiders too (maintainer 2026-11); GitLab pipeline_source in {push, web, schedule}; product_name resolved only within the workload's ef_project_id; registrations are operator input",
+      "conditions": "verified claims match exactly one registered workload; GitHub event_name in {push, workflow_dispatch, release, schedule}; GitLab matched on project_path and project_id (never job_project_*), so fork MR pipelines never match and a project re-created at a registered path is rejected until re-synced, against insiders too (maintainer 2026-11); GitLab pipeline_source in {push, web, schedule, api}; product_name resolved only within the workload's ef_project_id; registrations are operator input",
       "violation_symptom": "integrity-bypass",
       "severity_tier": "security",
       "provenance": "documented",

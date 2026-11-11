@@ -193,7 +193,7 @@ sequenceDiagram
      `{push, workflow_dispatch, release, schedule}`, i.e. events that only a
      maintainer can cause. Excludes triggers that can be indirectly driven by
      non-maintainers (`pull_request_target`, `workflow_run`, `issue_comment`, …).
-   - GitLab: `pipeline_source` must be in the allowlist `{push, web, schedule}`,
+   - GitLab: `pipeline_source` must be in the allowlist `{push, web, schedule, api}`,
      i.e. pipelines that only a committer can cause. Excludes
      `external_pull_request_event`, `trigger`, `merge_request_event`, … (see
      `P-WORKLOAD-BIND` in the [threat model](../threat-model.md)).
@@ -632,7 +632,7 @@ pipeline {
 - `project_path`: Full path of the project including its groups, e.g.
   `eclipse/foo/bar`
 - `project_id`: GitLab numeric project ID, never reused by GitLab
-- `pipeline_source`: Must be in the allowlist `{push, web, schedule}`
+- `pipeline_source`: Must be in the allowlist `{push, web, schedule, api}`
 
 **Example Publisher pipeline** (`.gitlab-ci.yml`):
 ```yaml

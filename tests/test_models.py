@@ -301,7 +301,7 @@ class TestVerifyWorkloadClaims:
         assert reason is not None
         assert "None" in reason
 
-    @pytest.mark.parametrize("pipeline_source", ["push", "web", "schedule"])
+    @pytest.mark.parametrize("pipeline_source", ["push", "web", "schedule", "api"])
     def test_gitlab_allowed_pipeline_source(self, gitlab_workload, pipeline_source):
         assert (
             verify_workload_claims(
@@ -316,7 +316,6 @@ class TestVerifyWorkloadClaims:
             "merge_request_event",
             "external_pull_request_event",
             "trigger",
-            "api",
             "pipeline",
             "parent_pipeline",
             "chat",

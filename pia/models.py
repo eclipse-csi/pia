@@ -45,13 +45,15 @@ file. Excludes triggers like `pull_request_target`, `workflow_run`, and
 `issue_comment` that can be indirectly driven by non-maintainers. Relax on
 demand."""
 
-GITLAB_ALLOWED_PIPELINE_SOURCES = frozenset({"push", "web", "schedule"})
+GITLAB_ALLOWED_PIPELINE_SOURCES = frozenset({"push", "web", "schedule", "api"})
 """Allowed values for the GitLab OIDC token's `pipeline_source` claim.
 
 Restricts the OIDC mint to pipelines that only a committer (Developer role or
 above) can cause: `push` and `web` (the "Run pipeline" button) require write
-access to the project, and `schedule` runs as the committer who owns the
-schedule. Excludes `external_pull_request_event`, which a GitHub-mirror pull
+access to the project, `schedule` runs as the committer who owns the
+schedule, and `api` (the Pipelines API) is the authenticated equivalent of
+`web`, requiring a user or access token with the same Developer role.
+Excludes `external_pull_request_event`, which a GitHub-mirror pull
 request from anyone can drive, `trigger`, which a leaked trigger token can
 drive, and `merge_request_event`, which publishes unmerged code. Relax on
 demand."""

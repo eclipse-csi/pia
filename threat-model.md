@@ -316,7 +316,7 @@ envelope:
 | uvicorn `--workers N>1` | 1 | Each worker keeps its own metrics registry; `/metrics` becomes wrong. | unsupported (needs multiprocess mode) | *(documented, DESIGN.md §5.4 "Single worker")* |
 | uvicorn `--reload`, migrations on app start | off | Dev conveniences in `docker-compose.yml`. | dev-only | *(documented, docker-compose.yml comments)* |
 | `pia sync --allow-db-updates-and-deletions` | off | Without it, `pia sync` refuses a plan that deletes or changes existing rows, so a bad file cannot silently deauthorize a project. | supported; explicit intent required | *(documented, `pia/cli.py` option help "Explicit intent is required")* |
-| `GITHUB_ALLOWED_EVENT_NAMES`, `GITLAB_ALLOWED_PIPELINE_SOURCES`, `GITLAB_ISSUER`, `JENKINS_ISSUER_BASE_URL` | `{push, workflow_dispatch, release, schedule}`, `{push, web, schedule}`, `https://gitlab.eclipse.org`, `https://ci.eclipse.org` | Code constants, not configuration. Changing any of them is a model change (§1.16). | n/a | *(documented, `pia/models.py` constant docstrings)* *(maintainer, 2026-11)* |
+| `GITHUB_ALLOWED_EVENT_NAMES`, `GITLAB_ALLOWED_PIPELINE_SOURCES`, `GITLAB_ISSUER`, `JENKINS_ISSUER_BASE_URL` | `{push, workflow_dispatch, release, schedule}`, `{push, web, schedule, api}`, `https://gitlab.eclipse.org`, `https://ci.eclipse.org` | Code constants, not configuration. Changing any of them is a model change (§1.16). | n/a | *(documented, `pia/models.py` constant docstrings)* *(maintainer, 2026-11)* |
 
 No shipped default voids a §1.11 property. Rows written to the database by
 anything other than `pia sync` are unsupported: the ORM comment states that the
@@ -456,7 +456,7 @@ Actors assume the §1.2 baseline deployment.
 | --- | --- | --- | --- | --- | --- |
 | Unauthenticated network client | **yes** | Reach the upload endpoint through the proxy; send any header, any unsigned or self-signed JWT with any `iss`, any body; repeat at the proxy's rate limit | No signing key of a registered issuer; no control over a registered issuer, DependencyTrack, the database, or the pod environment; no position on PIA's outbound connections | SSRF from PIA's network position, service stall, auth bypass, log forgery, error-path crashes | *(maintainer, 2026-11)* |
 | Non-maintainer contributor to a registered GitHub repository | **yes** | Open pull requests, comment, fork; cause `pull_request_target`, `workflow_run`, `issue_comment` runs that mint valid GitHub tokens for the repo | Cannot cause a `push`, `workflow_dispatch`, `release` or `schedule` run, and cannot author the workflow file such a run executes | Publish an SBOM as the project | *(documented, `pia/models.py` `GITHUB_ALLOWED_EVENT_NAMES` docstring "events that only a maintainer can cause")* |
-| Non-committer on Eclipse GitLab: a Reporter-role member of a registered project, a fork's merge request author, a pull request author on a GitHub mirror, a holder of a leaked pipeline trigger token, or any account holder with their own project | **yes** | Run pipelines in their own projects and forks and mint valid Eclipse GitLab tokens for them; cause `merge_request_event`, `external_pull_request_event` or `trigger` pipelines in a registered project | Cannot push to a registered project, press "Run pipeline" there, or own a schedule there, so cannot cause a `push`, `web` or `schedule` pipeline in it; cannot obtain a token whose `project_path` and `project_id` name a registered project from a fork | Publish an SBOM as the project | *(documented, `pia/models.py` `GITLAB_ALLOWED_PIPELINE_SOURCES` docstring)* *(maintainer, 2026-11)* |
+| Non-committer on Eclipse GitLab: a Reporter-role member of a registered project, a fork's merge request author, a pull request author on a GitHub mirror, a holder of a leaked pipeline trigger token, or any account holder with their own project | **yes** | Run pipelines in their own projects and forks and mint valid Eclipse GitLab tokens for them; cause `merge_request_event`, `external_pull_request_event` or `trigger` pipelines in a registered project | Cannot push to a registered project, press "Run pipeline" or call the Pipelines API there, or own a schedule there, so cannot cause a `push`, `web`, `schedule` or `api` pipeline in it; cannot obtain a token whose `project_path` and `project_id` name a registered project from a fork | Publish an SBOM as the project | *(documented, `pia/models.py` `GITLAB_ALLOWED_PIPELINE_SOURCES` docstring)* *(maintainer, 2026-11)* |
 | Registered workload (a maintainer-triggered workflow, a committer-caused pipeline of a registered GitLab project, or any job on a registered Jenkins) | **yes** | Hold a valid token for its own identity; choose `product_name`, `product_version`, `is_latest`, `bom`; replay its token until `exp` | Cannot obtain a token for another repository, GitLab project or Jenkins instance; cannot change registrations | Write into another EF project's DependencyTrack project; feed DependencyTrack malformed content | *(documented, README authorization note; DESIGN.md §4.3 "Authorization Boundary")* |
 | Registered issuer (GitHub's OIDC provider, the Eclipse GitLab instance, or a registered Jenkins controller), compromised or merely slow | **yes**, for confinement claims only | Serve any discovery and JWKS content; sign tokens for its own workloads; trickle responses | Cannot steer PIA's fetches off its own origin and path; cannot make PIA buffer more than 1 MiB per response; cannot have its keys accepted for another issuer's workloads | Cross-issuer key substitution, SSRF pivot, worker exhaustion | *(documented, PR #113 description "one project's Jenkins instance cannot point PIA at another project's keys"; PR #112 description "Known limitation (accepted risk)")* |
 | Project insider: a member of a registered GitHub owner with repository-creation rights, a Developer or Maintainer of a registered GitLab project, a committer, or EF staff | no | Create repositories under the registered owner, including re-creating a deleted or renamed one; push, run, schedule or include CI configuration in a registered GitLab project; trigger allowlisted publish events | Having a GitLab project re-created at a registered path accepted: the `project_id` pin is claimed against insiders too, so such a bypass is `VALID`, not out of scope | — | *(maintainer, 2026-10)* *(maintainer, 2026-11)* |
@@ -482,8 +482,8 @@ Actors assume the §1.2 baseline deployment.
 - **`P-ISSUER-PIN` Outbound fetch confinement** (`auth`): the two
   pre-authentication fetches go only to an allowlisted issuer origin. The
   unverified `iss` must be a string equal to the GitHub issuer, the Eclipse
-  GitLab issuer, or a registered Jenkins issuer (`pia/models.py:307`,
-  `pia/models.py:310`, `pia/models.py:318`); `jwks_uri` must start with `{iss}/` and continue with
+  GitLab issuer, or a registered Jenkins issuer (`pia/models.py:309`,
+  `pia/models.py:312`, `pia/models.py:320`); `jwks_uri` must start with `{iss}/` and continue with
   unreserved characters and no `.` or `..` segments (`pia/oidc.py:50`,
   `pia/oidc.py:54`, `pia/oidc.py:57`); redirects are refused and only HTTP 200
   is accepted (`pia/oidc.py:82`). *Violation symptom*:
@@ -506,15 +506,15 @@ Actors assume the §1.2 baseline deployment.
 - **`P-WORKLOAD-BIND` Project-scoped authorization** (`auth`,
   `upload-relay`): verified claims must match exactly one registered workload
   — GitHub by owner, repository name and `repository_owner_id`
-  (`pia/models.py:346`, `pia/models.py:347`, `pia/models.py:348`), GitLab by
-  `project_path` and `project_id` (`pia/models.py:366`, `pia/models.py:367`),
-  Jenkins by `iss` (`pia/models.py:370`); a GitHub `event_name` must be one of
-  `push`, `workflow_dispatch`, `release`, `schedule` (`pia/models.py:385`); a
-  GitLab `pipeline_source` must be one of `push`, `web`, `schedule`
-  (`pia/models.py:392`); the target is resolved by `product_name` only among
-  projects with the workload's `ef_project_id` (`pia/models.py:405`); one
-  identity maps to one EF project by uniqueness (`pia/models.py:155`,
-  `pia/models.py:191`, `pia/models.py:217`). For GitLab this means three
+  (`pia/models.py:348`, `pia/models.py:349`, `pia/models.py:350`), GitLab by
+  `project_path` and `project_id` (`pia/models.py:368`, `pia/models.py:369`),
+  Jenkins by `iss` (`pia/models.py:372`); a GitHub `event_name` must be one of
+  `push`, `workflow_dispatch`, `release`, `schedule` (`pia/models.py:387`); a
+  GitLab `pipeline_source` must be one of `push`, `web`, `schedule`, `api`
+  (`pia/models.py:394`); the target is resolved by `product_name` only among
+  projects with the workload's `ef_project_id` (`pia/models.py:407`); one
+  identity maps to one EF project by uniqueness (`pia/models.py:157`,
+  `pia/models.py:193`, `pia/models.py:219`). For GitLab this means three
   things:
   - **Fork pipelines never match.** In a merge request pipeline, the
     `project_path`, `project_id` and `namespace_*` claims name the MR's
@@ -525,13 +525,15 @@ Actors assume the §1.2 baseline deployment.
     match on `job_project_*` *(documented, `pia/models.py`
     `find_workload_by_claims` comment "NOT `job_project_*`")*.
   - **Committer-caused pipelines only.** `push` and `web` (the "Run
-    pipeline" button) need write access to the project, and `schedule` runs
-    as the committer who owns the schedule. Excluded are
+    pipeline" button) need write access to the project, `schedule` runs
+    as the committer who owns the schedule, and `api` (the Pipelines API)
+    needs a user or access token with the same Developer role as `web`
+    *(maintainer, 2026-11)*. Excluded are
     `external_pull_request_event`, which a pull request from anyone can
     drive on a GitHub-mirrored project; `trigger`, which a leaked trigger
     token can drive; and `merge_request_event`, which publishes unmerged
     code *(documented, `pia/models.py` `GITLAB_ALLOWED_PIPELINE_SOURCES`
-    docstring)*. The remaining sources (`api`, `pipeline`,
+    docstring)*. The remaining sources (`pipeline`,
     `parent_pipeline`, `chat`, `webide` and others) stay excluded until a
     project asks for them *(maintainer, 2026-11)*.
   - **Resurrection guard.** The `project_id` recorded at `pia sync` must
@@ -606,7 +608,7 @@ Actors assume the §1.2 baseline deployment.
 - **`P-OUTBOUND-TLS` Outbound transport security** (`auth`, `upload-relay`,
   `operator-tooling`): issuer URLs are HTTPS by construction (the GitHub
   and GitLab constants; Jenkins issuers must start with
-  `https://ci.eclipse.org/`, `pia/models.py:314`), the CLI's GitHub and
+  `https://ci.eclipse.org/`, `pia/models.py:316`), the CLI's GitHub and
   GitLab API URLs are HTTPS constants, and `requests` verifies certificates
   by default.
   *Violation symptom*: `info-leak` (token, API key or SBOM in cleartext).
@@ -739,7 +741,7 @@ DependencyTrack validates the SBOM; PIA forwards whatever the workload sent
   workflow that runs pull-request code hands that code a token PIA accepts;
   PIA sees a maintainer event and stops there. Keep publishing workflows free
   of untrusted inputs *(documented, `pia/models.py` `GITHUB_ALLOWED_EVENT_NAMES`
-  docstring)*. The same holds for a GitLab `push`, `web` or `schedule`
+  docstring)*. The same holds for a GitLab `push`, `web`, `schedule` or `api`
   pipeline: every job in it can mint a token, including jobs from `include`d
   CI files *(maintainer, 2026-11)*.
 - **Name-based repository identity.** A deleted or renamed repository's name,
@@ -789,7 +791,7 @@ describe what the code does, never how well the report was written.
   `GITLAB_ISSUER` or `JENKINS_ISSUER_BASE_URL`.
 - GitLab changing which project its `project_path` and `project_id` claims
   name in merge request pipelines, or Eclipse GitLab letting non-committers
-  cause `push`, `web` or `schedule` pipelines.
+  cause `push`, `web`, `schedule` or `api` pipelines.
 - Landing replay protection (issue #9), JWKS caching (issue #8), the async
   refactor with a whole-request deadline (DESIGN.md §10), compressed or
   streamed uploads (issue #111), `repository_id` matching (issue #108), or
