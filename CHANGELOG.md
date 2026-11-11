@@ -12,6 +12,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   matched by `project_path` and `project_id`, with a `pipeline_source`
   allowlist (`push`, `web`, `schedule`, `api`); `pia sync` accepts GitLab
   project URLs
+* End-to-end test of the Eclipse GitLab integration against the local stack,
+  exposed via an ngrok tunnel (`make test-e2e`)
 
 ## [0.9.0] - 2026-10-20
 

@@ -1,0 +1,66 @@
+# Reference copy of the `.gitlab-ci.yml` in
+# https://gitlab.eclipse.org/eclipsefdn/security/gitlab-id-demo, which the
+# GitLab e2e test (e2e/platforms/gitlab.py) runs via the Pipelines API.
+# Keep both in sync.
+#
+# The `pia-upload` job posts the SBOM passed as pipeline input to PIA and saves
+# PIA's response as an artifact. It does not fail on an error response, so
+# tests can assert on expected failures too.
+spec:
+  inputs:
+    pia_url:
+      default: ""
+    product_name:
+      default: ""
+    product_version:
+      default: ""
+    bom:
+      description: base64-encoded CycloneDX JSON
+      default: ""
+---
+pia-upload:
+  image: python:3.13-slim
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "api"
+  id_tokens:
+    PIA_ID_TOKEN:
+      aud: pia.eclipse.org
+  variables:
+    PIA_URL: $[[ inputs.pia_url ]]
+    PIA_PRODUCT_NAME: $[[ inputs.product_name ]]
+    PIA_PRODUCT_VERSION: $[[ inputs.product_version ]]
+    PIA_BOM: $[[ inputs.bom ]]
+  script:
+    - |
+      python3 - <<'EOF'
+      import json, os, urllib.error, urllib.request
+      req = urllib.request.Request(
+          os.environ["PIA_URL"].rstrip("/") + "/v1/upload/sbom",
+          data=json.dumps({
+              "product_name": os.environ["PIA_PRODUCT_NAME"],
+              "product_version": os.environ["PIA_PRODUCT_VERSION"],
+              "bom": os.environ["PIA_BOM"],
+          }).encode(),
+          headers={
+              "Authorization": "Bearer " + os.environ["PIA_ID_TOKEN"],
+              "Content-Type": "application/json",
+          },
+      )
+      try:
+          with urllib.request.urlopen(req, timeout=60) as r:
+              status, raw = r.status, r.read()
+      except urllib.error.HTTPError as e:
+          status, raw = e.code, e.read()
+      try:
+          body = json.loads(raw)
+      except ValueError:
+          body = raw.decode(errors="replace")
+      result = {"status": status, "body": body}
+      print(json.dumps(result, indent=2))
+      with open("pia-response.json", "w") as f:
+          json.dump(result, f)
+      EOF
+  artifacts:
+    when: always
+    paths:
+      - pia-response.json
