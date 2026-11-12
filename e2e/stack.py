@@ -2,8 +2,8 @@
 
 Starts postgres, DependencyTrack and the ngrok tunnel, provisions a
 DependencyTrack API key (reusing `scripts/dt_bootstrap.py`), (re)starts pia
-with that key, and registers the workloads in `projects.e2e.yaml` with
-`pia create-dt-projects` and `pia sync`. The stack is left running afterwards,
+with that key, and registers the workloads and products of the given platforms
+with `pia create-dt-projects` and `pia sync`. The stack is left running afterwards,
 tear it down with `docker compose --profile e2e down`.
 """
 
@@ -17,11 +17,15 @@ from pathlib import Path
 from types import ModuleType
 
 import requests
+import yaml
 
 from pia.sync import resolve_dt_child_uuid
 
+from .platforms import Platform
+
 REPO_ROOT = Path(__file__).resolve().parent.parent
-PROJECTS_FILE = Path(__file__).resolve().parent / "projects.e2e.yaml"
+EF_PROJECT = "technology.csi"
+DT_PROJECT = "PIA E2E"
 PIA_URL = "http://localhost:8000"
 NGROK_API_URL = "http://localhost:4040/api/tunnels"
 DATABASE_URL = "postgresql://pia:pia@localhost:5432/pia"
@@ -73,7 +77,24 @@ def _public_url() -> str:
     return next(t["public_url"] for t in tunnels if t["proto"] == "https")
 
 
-def up() -> Stack:
+def _write_projects_file(platforms: list[Platform], path: Path) -> None:
+    """Register all platforms' workloads and products under one EF project.
+
+    Synced with --allow-db-updates-and-deletions, so it replaces any other
+    registrations in the local database.
+    """
+    project = {
+        "id": EF_PROJECT,
+        "workloads": [p.workload_url for p in platforms],
+        "dependency_track": {
+            "project": DT_PROJECT,
+            "products": [p.product for p in platforms],
+        },
+    }
+    path.write_text(yaml.safe_dump({"projects": [project]}))
+
+
+def up(platforms: list[Platform], tmp_dir: Path) -> Stack:
     _run(["docker", "compose", "--profile", "e2e", "up", "-d", "postgres", "dtrack"])
 
     bootstrap = _load_dt_bootstrap()
@@ -92,16 +113,18 @@ def up() -> Stack:
     _wait_for(f"{PIA_URL}/livez")
     _run(["docker", "compose", "--profile", "e2e", "up", "-d", "ngrok"])
 
+    projects_file = str(tmp_dir / "projects.yaml")
+    _write_projects_file(platforms, Path(projects_file))
     pia = str(Path(sys.executable).parent / "pia")
     cli_env = {"PIA_DATABASE_URL": DATABASE_URL, "PIA_DEPENDENCY_TRACK_API_KEY": key}
     _run(
-        [pia, "create-dt-projects", str(PROJECTS_FILE), "--dt-url", dt_url],
+        [pia, "create-dt-projects", projects_file, "--dt-url", dt_url],
         env=cli_env,
     )
     _run(
-        [pia, "sync", str(PROJECTS_FILE), "--dt-url", dt_url]
+        [pia, "sync", projects_file, "--dt-url", dt_url]
         + ["--allow-db-updates-and-deletions"],
         env=cli_env,
     )
 
-    return Stack(dt_url, key, _public_url(), dt_project="PIA E2E")
+    return Stack(dt_url, key, _public_url(), dt_project=DT_PROJECT)

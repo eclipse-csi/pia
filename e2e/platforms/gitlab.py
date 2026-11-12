@@ -25,6 +25,8 @@ FINISHED = {"success", "failed", "canceled", "skipped"}
 
 class EclipseGitLab:
     name = "gitlab"
+    workload_url = f"{GITLAB_URL}/eclipsefdn/security/gitlab-id-demo"
+    product = "gitlab-id-demo"
 
     def __init__(self, token: str, timeout: float = 600, interval: float = 10):
         self.api = f"{GITLAB_URL}/api/v4/projects/{PROJECT_ID}"

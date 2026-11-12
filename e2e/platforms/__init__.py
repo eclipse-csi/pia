@@ -30,5 +30,7 @@ class UploadResult:
 
 class Platform(Protocol):
     name: str
+    workload_url: str  # as registered with `pia sync`
+    product: str  # DependencyTrack product to upload to
 
     def run_upload(self, req: UploadRequest) -> UploadResult: ...

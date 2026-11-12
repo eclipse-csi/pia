@@ -15,40 +15,61 @@ import pytest
 from . import stack as stack_mod
 from .dependencytrack import DependencyTrack
 from .platforms import Platform
+from .platforms.github import GitHubActions
 from .platforms.gitlab import EclipseGitLab
 
 DATA = Path(__file__).resolve().parent / "data"
 
 
-def _require_env(name: str) -> str:
-    value = os.environ.get(name)
-    if not value:
-        pytest.skip(f"{name} not set")
-    return value
+def _gitlab() -> Platform | None:
+    token = os.environ.get("PIA_E2E_GITLAB_TOKEN")
+    return EclipseGitLab(token) if token else None
 
 
-# Platform name -> factory; a factory skips if its credentials are missing.
-PLATFORMS: dict[str, Callable[[], Platform]] = {
-    "gitlab": lambda: EclipseGitLab(_require_env("PIA_E2E_GITLAB_TOKEN")),
+def _github() -> Platform | None:
+    token = os.environ.get("PIA_E2E_GITHUB_TOKEN")
+    repo = os.environ.get("PIA_E2E_GITHUB_REPO")
+    return GitHubActions(token, repo) if token and repo else None
+
+
+# Platform name -> factory, which returns None if credentials are missing.
+PLATFORMS: dict[str, Callable[[], Platform | None]] = {
+    "gitlab": _gitlab,
+    "github": _github,
 }
 
 
 @pytest.fixture(scope="session")
-def stack() -> stack_mod.Stack:
-    _require_env("NGROK_AUTHTOKEN")
-    return stack_mod.up()
-
-
-@pytest.fixture(scope="session")
-def dt(stack: stack_mod.Stack) -> DependencyTrack:
-    return DependencyTrack(stack.dt_url, stack.dt_api_key)
+def available_platforms() -> dict[str, Platform]:
+    platforms = {name: factory() for name, factory in PLATFORMS.items()}
+    return {name: p for name, p in platforms.items() if p is not None}
 
 
 # Session-scoped and requested before `stack`, so that a missing platform
 # credential skips before the stack is started.
 @pytest.fixture(scope="session")
-def platform(request: pytest.FixtureRequest) -> Platform:
-    return PLATFORMS[request.param]()
+def platform(
+    request: pytest.FixtureRequest, available_platforms: dict[str, Platform]
+) -> Platform:
+    if request.param not in available_platforms:
+        pytest.skip(f"no credentials for platform {request.param!r}")
+    return available_platforms[request.param]
+
+
+@pytest.fixture(scope="session")
+def stack(
+    available_platforms: dict[str, Platform], tmp_path_factory: pytest.TempPathFactory
+) -> stack_mod.Stack:
+    if not os.environ.get("NGROK_AUTHTOKEN"):
+        pytest.skip("NGROK_AUTHTOKEN not set")
+    return stack_mod.up(
+        list(available_platforms.values()), tmp_path_factory.mktemp("stack")
+    )
+
+
+@pytest.fixture(scope="session")
+def dt(stack: stack_mod.Stack) -> DependencyTrack:
+    return DependencyTrack(stack.dt_url, stack.dt_api_key)
 
 
 @pytest.fixture(scope="session")
