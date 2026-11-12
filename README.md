@@ -123,29 +123,61 @@ can exercise `pia sync` end to end.
 
 The tests in `e2e/` run real CI jobs that upload an SBOM to the local stack,
 which is exposed via an [ngrok](https://ngrok.com) tunnel. They then check
-that the SBOM arrived in the local DependencyTrack. Currently covered:
-Eclipse GitLab, using the `pia-upload` job of
-[gitlab-id-demo](https://gitlab.eclipse.org/eclipsefdn/security/gitlab-id-demo)
-(reference copy in `e2e/gitlab-id-demo.gitlab-ci.yml`).
+that the SBOM arrived in the local DependencyTrack. Covered platforms:
+- **Eclipse GitLab**: `pia-upload` job of
+  [gitlab-id-demo](https://gitlab.eclipse.org/eclipsefdn/security/gitlab-id-demo)
+  (reference copy in `e2e/gitlab-id-demo.gitlab-ci.yml`), started via the
+  Pipelines API
+- **GitHub Actions**: `pia-upload` workflow of a `pia-test-workload` repo you
+  own (reference copy in `e2e/pia-test-workload.pia-upload.yml`), started via
+  `workflow_dispatch`
 
 Requirements:
-- Docker (with ~5 GB of me
+- Docker (with ~5 GB of memory for DependencyTrack)
 - `NGROK_AUTHTOKEN`: authtoken of a (free) ngrok account
-- `PIA_E2E_GITLAB_TOKEN`: GitLab token that can create pipelines in
-  gitlab-id-demo and read their jobs and artifacts. That is either a project
-  access token with role Developer and scope `api`, or a fine-grained personal
-  access token with the project permissions "Pipeline: Create", "Pipeline:
-  Read", "Job: Read" and "Job Artifact: Read"
+- GitLab:
+  - `PIA_E2E_GITLAB_TOKEN`: GitLab token that can create pipelines in
+    gitlab-id-demo and read their jobs and artifacts. That is either a project
+    access token with role Developer and scope `api`, or a fine-grained
+    personal access token with the project permissions "Pipeline: Create",
+    "Pipeline: Read", "Job: Read" and "Job Artifact: Read"
+- GitHub:
+  - `PIA_E2E_GITHUB_REPO`: `<owner>/pia-test-workload` (see below)
+  - `PIA_E2E_GITHUB_TOKEN`: fine-grained personal access token with access to
+    only that repository and the repository permission "Actions: Read and
+    write"
 
+To set up the GitHub test repo:
+1. Create a repository named `pia-test-workload` under your account, with a
+   README so that the `main` branch exists. Any visibility works.
+   ```shell
+   gh repo create pia-test-workload --private --add-readme
+   ```
+2. Add the workflow on `main`, as `.github/workflows/pia-upload.yml`:
+   ```shell
+   gh repo clone pia-test-workload && cd pia-test-workload
+   mkdir -p .github/workflows
+   cp <path-to-pia>/e2e/pia-test-workload.pia-upload.yml .github/workflows/pia-upload.yml
+   git add .github && git commit -m "Add pia-upload workflow" && git push
+   ```
+3. Create the fine-grained personal access token at
+   https://github.com/settings/personal-access-tokens/new: under "Repository
+   access" select "Only select repositories" and `pia-test-workload`, and under
+   "Repository permissions" set "Actions" to "Read and write".
+
+Run the tests:
 ```shell
-NGROK_AUTHTOKEN=... PIA_E2E_GITLAB_TOKEN=... make test-e2e
+NGROK_AUTHTOKEN=... \
+PIA_E2E_GITLAB_TOKEN=... \
+PIA_E2E_GITHUB_REPO=<owner>/pia-test-workload PIA_E2E_GITHUB_TOKEN=... \
+make test-e2e
 ```
 
 The tests start and provision the `docker compose` stack themselves, including
-the `ngrok` service from the `e2e` profile. Note that this replaces any
-workloads synced from `projects.local.yaml` with those in
-`e2e/projects.e2e.yaml`. Tests for which credentials are missing are skipped.
-The stack keeps running afterwards. Stop it with:
+the `ngrok` service from the `e2e` profile. They register the workloads of all
+platforms with credentials under one EF project, which replaces any workloads
+synced from `projects.local.yaml`. Tests for platforms without credentials are
+skipped. The stack keeps running afterwards. Stop it with:
 ```shell
 docker compose --profile e2e down
 ```

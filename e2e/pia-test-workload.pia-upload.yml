@@ -1,0 +1,89 @@
+# Reference copy of `.github/workflows/pia-upload.yml` in the pia-test-workload
+# GitHub repo, which the GitHub e2e test (e2e/platforms/github.py) dispatches.
+# Keep both in sync. See README "End-to-end Tests" for how to set up the repo.
+#
+# The `pia-upload` job posts the SBOM passed as workflow input to PIA and saves
+# PIA's response as an artifact. It does not fail on an error response, so
+# tests can assert on expected failures too.
+name: pia-upload
+# The e2e test finds the dispatched run by this name
+run-name: ${{ inputs.product_version }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      pia_url:
+        required: true
+        type: string
+      product_name:
+        required: true
+        type: string
+      product_version:
+        required: true
+        type: string
+      bom:
+        description: base64-encoded CycloneDX JSON
+        required: true
+        type: string
+
+permissions: {}
+
+jobs:
+  pia-upload:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+    steps:
+      - name: Upload SBOM to PIA
+        env:
+          PIA_URL: ${{ inputs.pia_url }}
+          PIA_PRODUCT_NAME: ${{ inputs.product_name }}
+          PIA_PRODUCT_VERSION: ${{ inputs.product_version }}
+          PIA_BOM: ${{ inputs.bom }}
+        run: |
+          python3 - <<'EOF'
+          import json, os, urllib.error, urllib.request
+
+          # Request an OIDC token with PIA's audience from the Actions runtime
+          token_req = urllib.request.Request(
+              os.environ["ACTIONS_ID_TOKEN_REQUEST_URL"] + "&audience=pia.eclipse.org",
+              headers={
+                  "Authorization": "Bearer " + os.environ["ACTIONS_ID_TOKEN_REQUEST_TOKEN"]
+              },
+          )
+          with urllib.request.urlopen(token_req, timeout=30) as r:
+              id_token = json.load(r)["value"]
+
+          req = urllib.request.Request(
+              os.environ["PIA_URL"].rstrip("/") + "/v1/upload/sbom",
+              data=json.dumps({
+                  "product_name": os.environ["PIA_PRODUCT_NAME"],
+                  "product_version": os.environ["PIA_PRODUCT_VERSION"],
+                  "bom": os.environ["PIA_BOM"],
+              }).encode(),
+              headers={
+                  "Authorization": "Bearer " + id_token,
+                  "Content-Type": "application/json",
+              },
+          )
+          try:
+              with urllib.request.urlopen(req, timeout=60) as r:
+                  status, raw = r.status, r.read()
+          except urllib.error.HTTPError as e:
+              status, raw = e.code, e.read()
+          try:
+              body = json.loads(raw)
+          except ValueError:
+              body = raw.decode(errors="replace")
+          result = {"status": status, "body": body}
+          print(json.dumps(result, indent=2))
+          with open("pia-response.json", "w") as f:
+              json.dump(result, f)
+          EOF
+
+      - name: Store PIA response
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: pia-response
+          path: pia-response.json

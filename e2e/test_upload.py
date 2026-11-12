@@ -6,11 +6,10 @@ from .dependencytrack import DependencyTrack
 from .platforms import Platform, UploadRequest
 from .stack import Stack
 
-PRODUCT = "gitlab-id-demo"
 COMPONENT_PURL = "pkg:pypi/requests@2.32.3"  # see data/sbom.cdx.json
 
 
-@pytest.mark.parametrize("platform", ["gitlab"], indirect=True)
+@pytest.mark.parametrize("platform", ["gitlab", "github"], indirect=True)
 def test_upload_success(
     platform: Platform, stack: Stack, dt: DependencyTrack, sbom_b64: str
 ) -> None:
@@ -18,12 +17,12 @@ def test_upload_success(
     version = f"e2e-{uuid4().hex[:8]}"
 
     result = platform.run_upload(
-        UploadRequest(stack.public_url, PRODUCT, version, sbom_b64)
+        UploadRequest(stack.public_url, platform.product, version, sbom_b64)
     )
     assert result.status == 200, result
 
     dt.wait_processed(result.body["polling_url"])
-    project = dt.project(PRODUCT, version)
-    assert project["parent"]["uuid"] == stack.product_uuid(PRODUCT)
+    project = dt.project(platform.product, version)
+    assert project["parent"]["uuid"] == stack.product_uuid(platform.product)
     purls = {c.get("purl") for c in dt.components(project["uuid"])}
     assert COMPONENT_PURL in purls
