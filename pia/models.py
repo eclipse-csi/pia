@@ -166,7 +166,7 @@ class GitHubWorkload(Workload):
 
     __tablename__ = "github_workloads"
 
-    id: Mapped[int] = mapped_column(ForeignKey("workloads.id"), primary_key=True)
+    id: Mapped[int] = mapped_column(ForeignKey(Workload.id), primary_key=True)
     repo_name: Mapped[str] = mapped_column(String)
     repo_owner: Mapped[str] = mapped_column(String)
     repo_owner_id: Mapped[str] = mapped_column(String)
@@ -203,7 +203,7 @@ class GitLabWorkload(Workload):
 
     __tablename__ = "gitlab_workloads"
 
-    id: Mapped[int] = mapped_column(ForeignKey("workloads.id"), primary_key=True)
+    id: Mapped[int] = mapped_column(ForeignKey(Workload.id), primary_key=True)
     project_path: Mapped[str] = mapped_column(String)
     project_id: Mapped[str] = mapped_column(String)
 
@@ -231,7 +231,7 @@ class JenkinsWorkload(Workload):
 
     __tablename__ = "jenkins_workloads"
 
-    id: Mapped[int] = mapped_column(ForeignKey("workloads.id"), primary_key=True)
+    id: Mapped[int] = mapped_column(ForeignKey(Workload.id), primary_key=True)
 
     # See parent class for details about the uniqueness constraint.
     issuer: Mapped[str] = mapped_column(String, unique=True)

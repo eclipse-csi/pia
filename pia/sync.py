@@ -410,6 +410,43 @@ class DB:
     dt: dict[tuple[str, ...], DependencyTrackProject] = field(default_factory=dict)
 
 
+def _add_desired_workload(
+    desired: DB,
+    ef_project_id: str,
+    url: str,
+    owner_id_cache: dict[str, str],
+    github_token: str | None,
+) -> None:
+    """Resolve one workload URL and add it to ``desired``.
+
+    GitHub owner ids are memoized in ``owner_id_cache`` across calls.
+    """
+    kind, a, b = classify_workload_url(url)
+    if kind == "github":
+        owner, repo = a, b
+        if owner not in owner_id_cache:
+            owner_id_cache[owner] = fetch_github_owner_id(owner, github_token)
+        gh = GitHubWorkload(
+            ef_project_id=ef_project_id,
+            repo_owner=owner,
+            repo_name=repo,
+            repo_owner_id=owner_id_cache[owner],
+        )
+        desired.github[gh.diff_key] = gh
+    elif kind == "gitlab":
+        project_path = a
+        gl = GitLabWorkload(
+            ef_project_id=ef_project_id,
+            project_path=project_path,
+            project_id=fetch_gitlab_project_id(project_path),
+        )
+        desired.gitlab[gl.diff_key] = gl
+    else:
+        issuer = a
+        jk = JenkinsWorkload(ef_project_id=ef_project_id, issuer=issuer)
+        desired.jenkins[jk.diff_key] = jk
+
+
 def build_desired(
     pf: ProjectsFile,
     dt_url: str,
@@ -433,30 +470,9 @@ def build_desired(
         desired.ef[ef.diff_key] = ef
 
         for url in project.workloads:
-            kind, a, b = classify_workload_url(url)
-            if kind == "github":
-                owner, repo = a, b
-                if owner not in owner_id_cache:
-                    owner_id_cache[owner] = fetch_github_owner_id(owner, github_token)
-                gh = GitHubWorkload(
-                    ef_project_id=project.id,
-                    repo_owner=owner,
-                    repo_name=repo,
-                    repo_owner_id=owner_id_cache[owner],
-                )
-                desired.github[gh.diff_key] = gh
-            elif kind == "gitlab":
-                project_path = a
-                gl = GitLabWorkload(
-                    ef_project_id=project.id,
-                    project_path=project_path,
-                    project_id=fetch_gitlab_project_id(project_path),
-                )
-                desired.gitlab[gl.diff_key] = gl
-            else:
-                issuer = a
-                jk = JenkinsWorkload(ef_project_id=project.id, issuer=issuer)
-                desired.jenkins[jk.diff_key] = jk
+            _add_desired_workload(
+                desired, project.id, url, owner_id_cache, github_token
+            )
 
         dt = project.dependency_track
         if not dt:
