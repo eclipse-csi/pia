@@ -1,12 +1,12 @@
 {
   "spec_version": 1,
   "repository": "https://github.com/eclipse-csi/pia",
-  "commit": "972572be73e28a8982e089b1d60e11025fe716cc",
-  "date": "2026-11-11",
+  "commit": "d26ce3abbe474d4cde8e6b03ee79a3da88c26e03",
+  "date": "2026-11-12",
   "scope_subpath": null,
-  "description": "PIA is the Eclipse Foundation's OIDC authentication broker for SBOM uploads to DependencyTrack. A CI job (GitHub Actions or a registered Jenkins pipeline) posts an SBOM with a short-lived OIDC token; PIA verifies the token against the allowlisted issuer's JWKS, maps the verified identity to a registered Eclipse Foundation project, and relays the SBOM to that project's DependencyTrack target with PIA's own API key. It runs as one uvicorn worker per pod behind a TLS-terminating, rate-limiting reverse proxy; operators manage registrations with the `pia sync` CLI from a curated YAML file.",
+  "description": "PIA is the Eclipse Foundation's OIDC authentication broker for SBOM uploads to DependencyTrack. A CI job (GitHub Actions, Eclipse GitLab CI, or a registered Jenkins pipeline) posts an SBOM with a short-lived OIDC token; PIA verifies the token against the allowlisted issuer's JWKS, maps the verified identity to a registered Eclipse Foundation project, and relays the SBOM to that project's DependencyTrack target with PIA's own API key. It runs as one uvicorn worker per pod behind a TLS-terminating, rate-limiting reverse proxy; operators manage registrations with the `pia sync` CLI from a curated YAML file.",
   "confidence": {
-    "documented": 203,
+    "documented": 231,
     "inferred": 0
   },
   "components": [
@@ -115,8 +115,8 @@
     },
     {
       "component": "operator-tooling",
-      "boundary": "the curated file, PIA_* environment and GitHub / DependencyTrack answers are operator-trusted inputs that become the authorization policy in the database",
-      "reachability_precondition": "reachable from the curated file, the PIA_* environment, or a GitHub / DependencyTrack API response; all operator trust",
+      "boundary": "the curated file, PIA_* environment and GitHub / Eclipse GitLab / DependencyTrack answers are operator-trusted inputs that become the authorization policy in the database",
+      "reachability_precondition": "reachable from the curated file, the PIA_* environment, or a GitHub, Eclipse GitLab or DependencyTrack API response; all operator trust",
       "provenance": "documented",
       "source": "DESIGN.md §3.1.1, §3.1 steps 5–6, §4.3 and §5.5"
     }
@@ -158,6 +158,16 @@
       "component": "auth",
       "provenance": "documented",
       "source": "DESIGN.md §3.1.1 steps 5–6"
+    },
+    {
+      "entry_point": "POST /v1/upload/sbom",
+      "parameter": "verified GitLab claims (project_path, project_id, pipeline_source)",
+      "attacker_controllable": "conditional",
+      "condition": "only Eclipse GitLab can sign them, but any account holder can mint a token for their own project; in a merge request pipeline the project claims name the source project (the fork)",
+      "caller_must_enforce": "none — P-SIG, P-WORKLOAD-BIND; project_path and project_id must be printable strings before the lookup (P-ERRORS)",
+      "component": "auth",
+      "provenance": "documented",
+      "source": "maintainer ruling, 2026-11"
     },
     {
       "entry_point": "POST /v1/upload/sbom",
@@ -271,12 +281,12 @@
     },
     {
       "entry_point": "pia sync FILE",
-      "parameter": "GitHub and DependencyTrack API responses",
+      "parameter": "GitHub, Eclipse GitLab and DependencyTrack API responses",
       "attacker_controllable": "no",
-      "caller_must_enforce": "none — trusted collaborator output (§1.10)",
+      "caller_must_enforce": "none — trusted collaborator output (§1.10); a non-canonical GitLab path or a GitLab 404 (missing, private or internal project) aborts the sync",
       "component": "operator-tooling",
       "provenance": "documented",
-      "source": "pia/sync.py build_desired docstring"
+      "source": "pia/sync.py build_desired and fetch_gitlab_project_id docstrings"
     },
     {
       "entry_point": "pia create-dt-projects FILE",
@@ -322,14 +332,14 @@
       "blocking auth and upload I/O runs in the FastAPI threadpool, not on the event loop",
       "a read-only PostgreSQL user for the app; migrations run beforehand with their own credentials",
       "token exp/iat are checked against the pod clock with no leeway",
-      "outbound HTTPS to allowlisted issuers and the configured DependencyTrack URL; the CLI also calls api.github.com"
+      "outbound HTTPS to allowlisted issuers and the configured DependencyTrack URL; the CLI also calls api.github.com and, anonymously, the gitlab.eclipse.org REST API"
     ],
     "does_not": [
       "spawn child processes",
       "install signal handlers",
       "write files",
       "read environment variables other than PIA_* (requests would honour proxy/CA/.netrc settings, and the production image ships none)",
-      "open sockets other than to the issuer, DependencyTrack, api.github.com (CLI) and the database",
+      "open sockets other than to the issuer, DependencyTrack, api.github.com and gitlab.eclipse.org (CLI) and the database",
       "mutate process-wide state after import time (logging factory, Settings, Prometheus registry)"
     ],
     "provenance": "documented",
@@ -389,6 +399,7 @@
     "in_scope": [
       "unauthenticated-network-client",
       "non-maintainer-contributor",
+      "gitlab-non-committer",
       "registered-workload",
       "registered-issuer"
     ],
@@ -413,7 +424,7 @@
     },
     {
       "property": "P-ISSUER-PIN",
-      "conditions": "iss equals the GitHub issuer or a registered Jenkins issuer; jwks_uri under {iss}/ with unreserved characters and no dot segments; no redirects; HTTP 200 only",
+      "conditions": "iss equals the GitHub issuer, the Eclipse GitLab issuer, or a registered Jenkins issuer; jwks_uri under {iss}/ with unreserved characters and no dot segments; no redirects; HTTP 200 only",
       "violation_symptom": "x-outbound-request-to-unlisted-host",
       "severity_tier": "security",
       "provenance": "documented",
@@ -429,11 +440,11 @@
     },
     {
       "property": "P-WORKLOAD-BIND",
-      "conditions": "verified claims match exactly one registered workload; GitHub event_name a string in {push, workflow_dispatch, release, schedule}; product_name resolved only within the workload's ef_project_id; registrations are operator input",
+      "conditions": "verified claims match exactly one registered workload; GitHub event_name a string in {push, workflow_dispatch, release, schedule}; GitLab matched on project_path and project_id (never job_project_*), so fork MR pipelines never match and a project re-created at a registered path is rejected until re-synced, against insiders too (maintainer 2026-11); GitLab pipeline_source a string in {push, web, schedule, api}; product_name resolved only within the workload's ef_project_id; registrations are operator input",
       "violation_symptom": "integrity-bypass",
       "severity_tier": "security",
       "provenance": "documented",
-      "source": "README authorization note; DESIGN.md §3.1.1 steps 5–6 and §4.3"
+      "source": "README authorization note; DESIGN.md §3.1.1 steps 5–6 and §4.3; pia/models.py find_workload_by_claims comment, GITLAB_ALLOWED_PIPELINE_SOURCES and GitLabWorkload docstrings"
     },
     {
       "property": "P-NO-STALL",
@@ -461,7 +472,7 @@
     },
     {
       "property": "P-ERRORS",
-      "conditions": "malformed POST data (wrong JSON type, empty or non-printable product_name/product_version) yields 422 without echoing the body; token problems, including a malformed iss or workload-matching claims that are not printable strings or a non-string event_name, yield 401; DependencyTrack failure yields 502 or the relayed status; unprintable text (NUL, lone surrogates, other control characters) never reaches a database query, before or after authentication (maintainer 2026-11); an unhandled 500 on malformed unauthenticated input is a bug, not a vulnerability (maintainer ruling 2026-10)",
+      "conditions": "malformed POST data (wrong JSON type, empty or non-printable product_name/product_version) yields 422 without echoing the body; token problems, including a malformed iss or workload-matching claims that are not printable strings or a non-string event_name or pipeline_source, yield 401; DependencyTrack failure yields 502 or the relayed status; unprintable text (NUL, lone surrogates, other control characters) never reaches a database query, before or after authentication (maintainer 2026-11); an unhandled 500 on malformed unauthenticated input is a bug, not a vulnerability (maintainer ruling 2026-10)",
       "violation_symptom": "crash",
       "severity_tier": "correctness",
       "provenance": "documented",
@@ -477,7 +488,7 @@
     },
     {
       "property": "P-OUTBOUND-TLS",
-      "conditions": "issuer URLs are HTTPS by construction; requests verifies certificates by default; DependencyTrack URL is https (an http URL is dev-only, §1.6)",
+      "conditions": "issuer URLs and the CLI's GitHub and GitLab API URLs are HTTPS by construction; requests verifies certificates by default; DependencyTrack URL is https (an http URL is dev-only, §1.6)",
       "violation_symptom": "info-leak",
       "severity_tier": "security",
       "provenance": "documented",
@@ -493,7 +504,7 @@
     },
     {
       "property": "P-SYNC-ATOMIC",
-      "conditions": "pia sync prints its plan, refuses deletions/updates without --allow-db-updates-and-deletions, applies in one transaction, commits once; validator rejects duplicate ids, workload URLs and DependencyTrack names",
+      "conditions": "pia sync prints its plan, refuses deletions/updates without --allow-db-updates-and-deletions, applies in one transaction, commits once; validator rejects duplicate ids, workload URLs and DependencyTrack names; a non-canonical GitLab project path aborts the sync",
       "violation_symptom": "x-partial-authorization-state",
       "severity_tier": "correctness",
       "provenance": "documented",
@@ -538,10 +549,10 @@
     },
     {
       "property": "D-EVENT-SEMANTICS",
-      "reason": "maintainer-triggered events in a registered repository; only event_name is checked, not ref, workflow file, actor, environment or SHA",
+      "reason": "maintainer-triggered events in a registered repository: only event_name is checked, not ref, workflow file, actor, environment or SHA; committer-caused pipelines in a registered GitLab project: only pipeline_source is checked, not ref, ref_protected, environment, ci_config_ref_uri, sub or the requesting job, and jobs from included CI files may publish",
       "false_friend": false,
       "provenance": "documented",
-      "source": "DESIGN.md §3.1.1 step 6 lists the one check"
+      "source": "DESIGN.md §3.1.1 step 6 lists the one check; pia/main.py LOGGED_CLAIMS docstring"
     },
     {
       "property": "D-JENKINS-JOB",
@@ -552,7 +563,7 @@
     },
     {
       "property": "D-ISSUER-TRUST-ROOT",
-      "reason": "the compromised issuer's own workloads only; cross-issuer substitution is covered by P-ISSUER-PIN",
+      "reason": "the compromised or faulty issuer's own workloads only, including signed claims that contradict the issuer's own documentation (e.g. GitLab naming the parent in a fork MR token, maintainer 2026-11); cross-issuer substitution is covered by P-ISSUER-PIN; PIA matching a claim its issuer documents differently is VALID against P-WORKLOAD-BIND",
       "false_friend": false,
       "provenance": "documented",
       "source": "DESIGN.md §2.2 items 1–2"
@@ -615,10 +626,10 @@
     },
     {
       "property": "D-CLI-BOUNDS",
-      "reason": "absence-based; interactive operator use; GitHub and DependencyTrack calls in pia sync have no timeout; concurrent runs are not serialized",
+      "reason": "absence-based except the stated per-read timeout; interactive operator use; GitHub, Eclipse GitLab and DependencyTrack calls in pia sync have 5 s connect and 30 s per-read timeouts but no total deadline; concurrent runs are not serialized",
       "false_friend": false,
       "provenance": "documented",
-      "source": "DESIGN.md §5.5 makes no such statement"
+      "source": "DESIGN.md §5.5 makes no such statement; pia/sync.py TIMEOUT docstring"
     }
   ],
   "attack_classes": [
@@ -643,11 +654,14 @@
     "scope the DependencyTrack API key to what each caller needs and rotate it",
     "run migrations as a separate job with migration credentials; give the app a read-only database user",
     "treat the curated file as the authorization policy: review every plan with --dry-run first, keep repository URLs canonical and each repository under exactly one EF project, re-sync after a DependencyTrack rename",
+    "re-sync after a registered GitLab project is renamed, transferred, or deleted and re-created",
     "set PIA_EXPECTED_AUDIENCE to a deployment-unique value and configure every issuer's token request with it",
     "register a Jenkins instance only if everyone who can define jobs on it may publish for that EF project",
     "keep the pod environment free of proxy, CA-bundle and .netrc settings you do not intend requests to honour",
     "run one uvicorn worker per container; scale by pods",
     "keep workflows on push, workflow_dispatch, release or schedule free of untrusted code",
+    "on Eclipse GitLab, treat Developer access to a registered project (push, Run pipeline, Pipelines API, schedules) like a credential; keep the publishing job small, limit it to release refs with rules:, protect those refs, and consider a protected environment with required approvals",
+    "treat any token that can create api pipelines in a registered GitLab project as an SBOM-publishing credential, especially one held outside GitLab; least scope, shortest lifetime, stored like a release credential",
     "treat the ID token as a credential for its lifetime; do not print it; expect no replay protection",
     "poll the returned polling_url; a 200 means accepted, not processed; do not retry a 500 blindly",
     "DependencyTrack validates the SBOM; PIA forwards whatever the workload sent"
@@ -660,12 +674,12 @@
     },
     {
       "pattern": "a deleted or renamed repository's name is re-created under the same owner and inherits the registration",
-      "why_unsafe": "GitHub workloads are matched on owner id plus names, not repository_id, so a re-created repo silently becomes the publisher",
+      "why_unsafe": "GitHub workloads are matched on owner id plus names, not repository_id, so a re-created repo silently becomes the publisher (GitLab workloads are pinned by project_id)",
       "instead": "treat repo deletion or rename as a pia sync event; repository_id matching is planned as hardening"
     },
     {
       "pattern": "two spellings of one repository registered under two EF projects",
-      "why_unsafe": "GitHub names are case-insensitive, so only one row ever matches and the policy no longer says what it means",
+      "why_unsafe": "GitHub names are case-insensitive, so only one row ever matches and the policy no longer says what it means; GitLab paths are checked for canonical spelling at sync",
       "instead": "keep URLs canonical"
     },
     {
