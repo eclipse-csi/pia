@@ -12,6 +12,7 @@ from pia.models import (
     DependencyTrackProject,
     EclipseFoundationProject,
     GitHubWorkload,
+    GitLabWorkload,
     JenkinsWorkload,
 )
 from pia.sync import (
@@ -23,6 +24,7 @@ from pia.sync import (
     classify_workload_url,
     compute_plan,
     ensure_dt_projects,
+    fetch_gitlab_project_id,
     load_projects_file,
     resolve_dt_child_uuid,
     validate_projects_file,
@@ -62,9 +64,33 @@ def test_classify_workload_url():
         "https://ci.eclipse.org/foo/oidc",
         "",
     )
+    # A GitLab project may be nested in subgroups; the full path is the identity.
+    assert classify_workload_url("https://gitlab.eclipse.org/eclipse/foo/bar") == (
+        "gitlab",
+        "eclipse/foo/bar",
+        "",
+    )
+    assert classify_workload_url("https://gitlab.eclipse.org/eclipse/foo/") == (
+        "gitlab",
+        "eclipse/foo",
+        "",
+    )
 
     with pytest.raises(click.ClickException, match="GitHub URL"):
         classify_workload_url("https://github.com/only-owner")
+
+    with pytest.raises(click.ClickException, match="GitLab URL"):
+        classify_workload_url("https://gitlab.eclipse.org/only-group")
+
+    # Web UI and clone URLs are not project URLs.
+    with pytest.raises(click.ClickException, match="GitLab URL"):
+        classify_workload_url("https://gitlab.eclipse.org/eclipse/foo/bar/-/tree/main")
+
+    with pytest.raises(click.ClickException, match="GitLab URL"):
+        classify_workload_url("https://gitlab.eclipse.org/eclipse/foo/bar.git")
+
+    with pytest.raises(click.ClickException, match="URL must be a"):
+        classify_workload_url("https://gitlab.com/eclipse/foo")
 
     with pytest.raises(click.ClickException, match="Jenkins URL"):
         classify_workload_url("https://ci.eclipse.org")
@@ -183,6 +209,34 @@ def test_build_desired_derives_jenkins_issuer():
     ]
 
 
+def test_build_desired_resolves_gitlab_project_id(monkeypatch):
+    calls = []
+
+    def fake_fetch(project_path):
+        calls.append(project_path)
+        return "16770"
+
+    monkeypatch.setattr(sync_module, "fetch_gitlab_project_id", fake_fetch)
+    pf = ProjectsFile(
+        projects=[
+            ProjectSpec(
+                id="eclipse-foo",
+                workloads=["https://gitlab.eclipse.org/eclipse/foo/bar"],
+            )
+        ]
+    )
+    desired = sync_module.build_desired(
+        pf, dt_url="https://dt.example", dt_api_key="k", github_token=None
+    )
+    [gl] = desired.gitlab.values()
+    assert (gl.ef_project_id, gl.project_path, gl.project_id) == (
+        "eclipse-foo",
+        "eclipse/foo/bar",
+        "16770",
+    )
+    assert calls == ["eclipse/foo/bar"]
+
+
 def test_validate_rejects_colliding_dt_projects(tmp_path):
     pf = load_projects_file(
         _write(
@@ -298,13 +352,31 @@ def test_validate_rejects_unknown_field(tmp_path):
 # --------------------------------------------------------------------------- #
 
 
-def _db(*, ef=(), github=(), jenkins=(), dt=()) -> DB:
+def _db(*, ef=(), github=(), gitlab=(), jenkins=(), dt=()) -> DB:
     """Build a DB snapshot from object lists, keyed via diff_key like production."""
     return DB(
         ef={o.diff_key: o for o in ef},
         github={o.diff_key: o for o in github},
+        gitlab={o.diff_key: o for o in gitlab},
         jenkins={o.diff_key: o for o in jenkins},
         dt={o.diff_key: o for o in dt},
+    )
+
+
+def _seed_github() -> GitHubWorkload:
+    return GitHubWorkload(
+        ef_project_id="eclipse-test",
+        repo_owner="eclipse-test",
+        repo_name="repo",
+        repo_owner_id="42",
+    )
+
+
+def _seed_gitlab() -> GitLabWorkload:
+    return GitLabWorkload(
+        ef_project_id="eclipse-test",
+        project_path="eclipse/test/repo",
+        project_id="16770",
     )
 
 
@@ -317,6 +389,11 @@ def test_compute_plan_creates_on_empty_db(session):
                 repo_owner="eclipse-foo",
                 repo_name="repo",
                 repo_owner_id="7",
+            )
+        ],
+        gitlab=[
+            GitLabWorkload(
+                ef_project_id="eclipse-foo", project_path="eclipse/foo", project_id="1"
             )
         ],
         jenkins=[
@@ -332,7 +409,14 @@ def test_compute_plan_creates_on_empty_db(session):
     )
     plan = compute_plan(session, desired)
     assert [p.id for p in plan.ef_create] == ["eclipse-foo"]
-    assert len(plan.creates) == 3
+    # One of each workload type plus the DT project: guards the hard-coded
+    # list of (current, desired) buckets in compute_plan.
+    assert sorted(type(o).__name__ for o in plan.creates) == [
+        "DependencyTrackProject",
+        "GitHubWorkload",
+        "GitLabWorkload",
+        "JenkinsWorkload",
+    ]
     assert not plan.deletes
     assert not plan.ef_delete
 
@@ -368,17 +452,11 @@ def test_compute_plan_update_is_delete_plus_create(seed_db):
 
 def test_compute_plan_deletes_removed(seed_db):
     session = seed_db
-    # Keep only eclipse-test's GitHub workload + DT project; drop everything else.
+    # Keep only eclipse-test's workloads + DT project; drop everything else.
     desired = _db(
         ef=[EclipseFoundationProject(id="eclipse-test")],
-        github=[
-            GitHubWorkload(
-                ef_project_id="eclipse-test",
-                repo_owner="eclipse-test",
-                repo_name="repo",
-                repo_owner_id="42",
-            )
-        ],
+        github=[_seed_github()],
+        gitlab=[_seed_gitlab()],
         dt=[
             DependencyTrackProject(
                 ef_project_id="eclipse-test", name="test-product", parent_uuid="uuid-1"
@@ -440,14 +518,8 @@ def test_apply_deletes_children_before_project(seed_db):
     # Reconcile to a file that no longer contains eclipse-other at all.
     desired = _db(
         ef=[EclipseFoundationProject(id="eclipse-test")],
-        github=[
-            GitHubWorkload(
-                ef_project_id="eclipse-test",
-                repo_owner="eclipse-test",
-                repo_name="repo",
-                repo_owner_id="42",
-            )
-        ],
+        github=[_seed_github()],
+        gitlab=[_seed_gitlab()],
         dt=[
             DependencyTrackProject(
                 ef_project_id="eclipse-test", name="test-product", parent_uuid="uuid-1"
@@ -464,6 +536,7 @@ def test_apply_deletes_children_before_project(seed_db):
     )
     assert session.query(DependencyTrackProject).count() == 1
     assert session.query(GitHubWorkload).count() == 1
+    assert session.query(GitLabWorkload).count() == 1
 
 
 def _desired_matching_seed() -> DB:
@@ -473,14 +546,8 @@ def _desired_matching_seed() -> DB:
             EclipseFoundationProject(id="eclipse-test"),
             EclipseFoundationProject(id="eclipse-other"),
         ],
-        github=[
-            GitHubWorkload(
-                ef_project_id="eclipse-test",
-                repo_owner="eclipse-test",
-                repo_name="repo",
-                repo_owner_id="42",
-            )
-        ],
+        github=[_seed_github()],
+        gitlab=[_seed_gitlab()],
         jenkins=[
             JenkinsWorkload(
                 ef_project_id="eclipse-other",
@@ -519,6 +586,7 @@ def patch_cli(session_factory, monkeypatch):
     monkeypatch.setattr(
         sync_module, "fetch_github_owner_id", lambda owner, token=None: "42"
     )
+    monkeypatch.setattr(sync_module, "fetch_gitlab_project_id", lambda path: "16770")
     monkeypatch.setattr(
         sync_module,
         "resolve_dt_child_uuid",
@@ -632,7 +700,9 @@ def test_sync_apply_creates_rows(runner, tmp_path, session_factory, patch_cli):
         """
         projects:
           - id: eclipse-foo
-            workloads: ["https://github.com/eclipse-foo/repo"]
+            workloads:
+              - https://github.com/eclipse-foo/repo
+              - https://gitlab.eclipse.org/eclipse/foo/repo
             dependency_track:
               project: "Eclipse Foo"
               products: [foo-server]
@@ -640,8 +710,11 @@ def test_sync_apply_creates_rows(runner, tmp_path, session_factory, patch_cli):
     )
     result = runner.invoke(cli_module.cli, ["sync", f, "--dt-url", "https://dt"])
     assert result.exit_code == 0, result.output
+    assert "GitLab Workload" in result.output
     with session_factory() as s:
         assert s.query(GitHubWorkload).count() == 1
+        [gl] = s.query(GitLabWorkload).all()
+        assert (gl.project_path, gl.project_id) == ("eclipse/foo/repo", "16770")
         assert s.query(DependencyTrackProject).count() == 1
         assert s.query(EclipseFoundationProject).count() == 1
 
@@ -694,6 +767,68 @@ def test_sync_updates_and_deletions_require_allow_flag(
             s.query(EclipseFoundationProject).filter_by(id="eclipse-stale").count() == 0
         )
         assert s.query(GitHubWorkload).count() == 1
+
+
+# --------------------------------------------------------------------------- #
+# GitLab project resolution (fetch_gitlab_project_id)
+# --------------------------------------------------------------------------- #
+
+
+def test_fetch_gitlab_project_id(monkeypatch):
+    urls = []
+
+    timeouts = []
+
+    def fake_get(url, **k):
+        urls.append(url)
+        timeouts.append(k.get("timeout"))
+        return _resp({"id": 16770, "path_with_namespace": "eclipse/foo/bar"})
+
+    monkeypatch.setattr(sync_module.requests, "get", fake_get)
+    assert fetch_gitlab_project_id("eclipse/foo/bar") == "16770"
+    # The path is a single percent-encoded URL segment.
+    assert urls == ["https://gitlab.eclipse.org/api/v4/projects/eclipse%2Ffoo%2Fbar"]
+    # A hung GitLab API must not hang `pia sync` forever.
+    assert timeouts == [sync_module.TIMEOUT]
+
+
+def test_fetch_gitlab_project_id_rejects_non_canonical_path(monkeypatch):
+    # GitLab resolves paths case-insensitively, but the token carries the
+    # canonical path and matching is exact, so the file must list it as is.
+    monkeypatch.setattr(
+        sync_module.requests,
+        "get",
+        lambda *a, **k: _resp({"id": 16770, "path_with_namespace": "eclipse/foo/bar"}),
+    )
+    with pytest.raises(
+        click.ClickException, match="not canonical, use 'eclipse/foo/bar'"
+    ):
+        fetch_gitlab_project_id("Eclipse/Foo/Bar")
+
+
+def test_fetch_gitlab_project_id_not_found(monkeypatch):
+    # GitLab answers 404 for missing projects and, to anonymous requests, for
+    # private or internal ones: a usage error, not a traceback.
+    def fake_get(*a, **k):
+        r = _resp({"message": "404 Project Not Found"})
+        r.status_code = 404
+        return r
+
+    monkeypatch.setattr(sync_module.requests, "get", fake_get)
+    with pytest.raises(click.ClickException, match="not found, or not public"):
+        fetch_gitlab_project_id("eclipse/no/such")
+
+
+def test_fetch_gitlab_project_id_raises_on_http_error(monkeypatch):
+    def fake_get(*a, **k):
+        r = _resp({"message": "500 Internal Server Error"})
+        r.status_code = 500
+        r.raise_for_status.side_effect = sync_module.requests.HTTPError("500")
+        return r
+
+    monkeypatch.setattr(sync_module.requests, "get", fake_get)
+    with pytest.raises(sync_module.requests.HTTPError):
+        fetch_gitlab_project_id("eclipse/foo/bar")
 
 
 # --------------------------------------------------------------------------- #

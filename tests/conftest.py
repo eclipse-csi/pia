@@ -11,6 +11,7 @@ from pia.models import (
     DependencyTrackProject,
     EclipseFoundationProject,
     GitHubWorkload,
+    GitLabWorkload,
     JenkinsWorkload,
 )
 
@@ -54,7 +55,7 @@ def session(session_factory):
 
 @pytest.fixture
 def seed_db(session):
-    """Populate DB with two projects, two workloads, and two DT projects."""
+    """Populate DB with two projects, three workloads, and two DT projects."""
     # Flush the parent projects before their children: the models carry no
     # relationship(), so SQLAlchemy cannot infer the insert order needed to
     # satisfy the foreign keys (now enforced under SQLite too).
@@ -72,6 +73,11 @@ def seed_db(session):
                 repo_owner="eclipse-test",
                 repo_name="repo",
                 repo_owner_id="42",
+            ),
+            GitLabWorkload(
+                ef_project_id="eclipse-test",
+                project_path="eclipse/test/repo",
+                project_id="16770",
             ),
             JenkinsWorkload(
                 ef_project_id="eclipse-other",

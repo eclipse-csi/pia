@@ -5,6 +5,7 @@ projects:
     workloads:
       - https://github.com/eclipse-csi/pia
       - https://github.com/eclipse-csi/otterdog
+      - https://gitlab.eclipse.org/eclipsefdn/security/gitlab-id-demo
     dependency_track:
       project: "Eclipse CSI"
       products:

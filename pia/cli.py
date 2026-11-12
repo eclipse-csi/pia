@@ -6,6 +6,7 @@ Subcommands
   database (create/update/delete).
   - DependencyTrack API key needs VIEW_PORTFOLIO permission
   - Permissionless GitHub token is optional for higher rate limits
+  - GitLab project ids are resolved anonymously (Eclipse projects are public)
 
 - create-dt-projects: Create the DependencyTrack projects referenced by a curated
   file (provisioning only; no database access).
@@ -90,9 +91,11 @@ def sync(
 ) -> None:
     """Reconcile all authorizations from a curated FILE into the database.
 
-    Computes the difference between the file (the source of truth) and the
-    current database state, prints the plan, and — unless --dry-run — applies
-    it, creating, updating and deleting rows to match the file.
+    The file lists Eclipse Foundation projects, each with its workload URLs
+    (GitHub repo, GitLab project or Jenkins instance URL) and DependencyTrack
+    products. Computes the difference between the file (the source of truth)
+    and the current database state, prints the plan, and — unless --dry-run —
+    applies it, creating, updating and deleting rows to match the file.
 
     The DependencyTrack projects referenced by the file must already exist; a
     missing one is an error. Run `pia create-dt-projects` first to provision them.

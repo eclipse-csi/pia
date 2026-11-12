@@ -16,6 +16,12 @@ GITHUB_ISSUER = "https://token.actions.githubusercontent.com"
 GITHUB_BASE_URL = "https://github.com"
 """Scheme and host of the GitHub repo URLs accepted when registering workloads."""
 
+GITLAB_ISSUER = "https://gitlab.eclipse.org"
+"""OIDC issuer for Eclipse GitLab CI tokens. Constant across all GitLab workloads.
+
+Also the scheme and host of the GitLab project URLs accepted when registering
+workloads: a self-managed GitLab instance issues tokens at its own origin."""
+
 JENKINS_ISSUER_BASE_URL = "https://ci.eclipse.org"
 """Scheme and host every Jenkins issuer URL must have."""
 
@@ -37,6 +43,23 @@ Restricts the OIDC mint to events that only a maintainer can cause: `push`,
 `schedule` takes no external input and runs the default branch's workflow
 file. Excludes triggers like `pull_request_target`, `workflow_run`, and
 `issue_comment` that can be indirectly driven by non-maintainers. Relax on
+demand."""
+
+GITLAB_ALLOWED_PIPELINE_SOURCES = frozenset({"push", "web", "schedule", "api"})
+"""Allowed values for the GitLab OIDC token's `pipeline_source` claim.
+
+Restricts the OIDC mint to pipelines that only a committer (Developer role or
+above) can cause: `push` and `web` (the "Run pipeline" button) require write
+access to the project, and `schedule` runs as the committer who owns the
+schedule. `api` (the Pipelines API) adds no publisher: it needs a user or
+access token with `api` scope and the Developer role, which can already push
+commits and so cause a `push` pipeline.
+
+Excludes `trigger`: a pipeline trigger token can start pipelines but not
+push, and it is meant to be handed to other projects and systems, so
+allowing it would let non-committers publish. Also excludes
+`external_pull_request_event`, which a GitHub-mirror pull request from anyone
+can drive, and `merge_request_event`, which publishes unmerged code. Relax on
 demand."""
 
 
@@ -102,10 +125,10 @@ class EclipseFoundationProject(Base):
 class Workload(Base):
     """CI/CD entity authorized to upload SBOMs.
 
-    Polymorphic base — see GitHubWorkload and JenkinsWorkload. Uses joined-
-    table inheritance: each subclass gets its own table sharing the `id` PK
-    with this base table. SQLAlchemy uses the `type` discriminator column to
-    instantiate the right subclass when loading rows.
+    Polymorphic base — see GitHubWorkload, GitLabWorkload and JenkinsWorkload.
+    Uses joined-table inheritance: each subclass gets its own table sharing the
+    `id` PK with this base table. SQLAlchemy uses the `type` discriminator
+    column to instantiate the right subclass when loading rows.
     """
 
     __tablename__ = "workloads"
@@ -164,6 +187,42 @@ class GitHubWorkload(Workload):
         return (
             f"GitHub Workload  (project: {self.ef_project_id}, "
             f"repo: {self.repo_owner}/{self.repo_name}, owner id: {self.repo_owner_id})"
+        )
+
+
+class GitLabWorkload(Workload):
+    """Eclipse GitLab CI workload. Issuer is always GITLAB_ISSUER.
+
+    `project_id` is the resurrection guard: it is the never-reused numeric id
+    of the exact GitLab project, so a project (or its whole namespace) deleted
+    and re-created at the same path no longer matches until it is re-synced.
+    No separate namespace id is needed for that: deleting a group deletes its
+    projects, and on Eclipse GitLab all projects live under the Eclipse
+    Foundation-managed root group.
+    """
+
+    __tablename__ = "gitlab_workloads"
+
+    id: Mapped[int] = mapped_column(ForeignKey("workloads.id"), primary_key=True)
+    project_path: Mapped[str] = mapped_column(String)
+    project_id: Mapped[str] = mapped_column(String)
+
+    # See parent class for details about the uniqueness constraint.
+    __table_args__ = (UniqueConstraint("project_path", "project_id"),)
+
+    __mapper_args__ = {
+        "polymorphic_identity": "gitlab",
+    }
+
+    @property
+    def diff_key(self) -> tuple[str, ...]:
+        return (self.ef_project_id, self.project_path, self.project_id)
+
+    def __repr__(self) -> str:
+        # extra space is intentional to align with other models
+        return (
+            f"GitLab Workload  (project: {self.ef_project_id}, "
+            f"path: {self.project_path}, project id: {self.project_id})"
         )
 
 
@@ -261,6 +320,7 @@ def is_issuer_known(session: Session, issuer: object) -> bool:
     """Check if issuer is known to PIA.
 
     GitHub: issuer must equal GITHUB_ISSUER
+    GitLab: issuer must equal GITLAB_ISSUER
     Jenkins: issuer must equal the issuer of a registered JenkinsWorkload in DB
     """
     # The issuer comes from an unverified token and may be any JSON type, or
@@ -268,7 +328,7 @@ def is_issuer_known(session: Session, issuer: object) -> bool:
     if not is_printable_str(issuer):
         return False
 
-    if issuer == GITHUB_ISSUER:
+    if issuer in (GITHUB_ISSUER, GITLAB_ISSUER):
         return True
 
     # Preliminary host check to skip more costly db query below for obvious junk
@@ -286,6 +346,7 @@ def find_workload_by_claims(
     """Find Workload matching verified token claims.
 
     GitHub: match by repo_owner, repo_name, repo_owner_id.
+    GitLab: match by project_path, project_id.
     Jenkins: match by exact issuer.
     Returns None if no match.
     """
@@ -313,6 +374,25 @@ def find_workload_by_claims(
             GitHubWorkload.repo_name == repo_name,
             GitHubWorkload.repo_owner_id == repo_owner_id,
         )
+    elif issuer == GITLAB_ISSUER:
+        # Match `project_path`/`project_id`, NOT `job_project_*`: in a merge
+        # request pipeline these name the MR's *source* project, i.e. the fork
+        # when a fork's MR pipeline runs in the parent project, while
+        # `job_project_*` and `ci_config_ref_uri` name the parent. Matching
+        # the source project is what keeps a fork from publishing as the
+        # parent (see threat-model.md, P-WORKLOAD-BIND).
+        project_path = token_claims.get("project_path")
+        project_id = token_claims.get("project_id")
+        if not is_printable_str(project_path) or not is_printable_str(project_id):
+            logger.info(
+                f"GitLab token missing or malformed 'project_path' or 'project_id' "
+                f"claim: {project_path!a}, {project_id!a}"
+            )
+            return None
+        stmt = select(GitLabWorkload).where(
+            GitLabWorkload.project_path == project_path,
+            GitLabWorkload.project_id == project_id,
+        )
     else:
         if not is_printable_str(issuer):
             logger.info(f"Token has malformed Jenkins 'iss' claim: {issuer!a}")
@@ -339,6 +419,16 @@ def verify_workload_claims(workload: Workload, claims: dict[str, Any]) -> str | 
             return (
                 f"GitHub event_name {event_name!r} not in allowlist "
                 f"{sorted(GITHUB_ALLOWED_EVENT_NAMES)}"
+            )
+    elif isinstance(workload, GitLabWorkload):
+        pipeline_source = claims.get("pipeline_source")
+        # isinstance first: an unhashable claim (list, dict) would raise
+        if not isinstance(pipeline_source, str) or (
+            pipeline_source not in GITLAB_ALLOWED_PIPELINE_SOURCES
+        ):
+            return (
+                f"GitLab pipeline_source {pipeline_source!r} not in allowlist "
+                f"{sorted(GITLAB_ALLOWED_PIPELINE_SOURCES)}"
             )
     return None
 
