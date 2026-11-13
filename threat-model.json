@@ -1,8 +1,8 @@
 {
   "spec_version": 1,
   "repository": "https://github.com/eclipse-csi/pia",
-  "commit": "d26ce3abbe474d4cde8e6b03ee79a3da88c26e03",
-  "date": "2026-11-12",
+  "commit": "901d3d55dff13c7c8a0835b47853ec7b07bfac1b",
+  "date": "2026-11-13",
   "scope_subpath": null,
   "description": "PIA is the Eclipse Foundation's OIDC authentication broker for SBOM uploads to DependencyTrack. A CI job (GitHub Actions, Eclipse GitLab CI, or a registered Jenkins pipeline) posts an SBOM with a short-lived OIDC token; PIA verifies the token against the allowlisted issuer's JWKS, maps the verified identity to a registered Eclipse Foundation project, and relays the SBOM to that project's DependencyTrack target with PIA's own API key. It runs as one uvicorn worker per pod behind a TLS-terminating, rate-limiting reverse proxy; operators manage registrations with the `pia sync` CLI from a curated YAML file.",
   "confidence": {
@@ -138,7 +138,7 @@
       "caller_must_enforce": "none — must be a printable string before the database lookup, else 401 (P-ERRORS); P-ISSUER-PIN",
       "component": "auth",
       "provenance": "documented",
-      "source": "DESIGN.md §3.1.1 step 2; CHANGELOG [Unreleased] untrusted input sanitization"
+      "source": "DESIGN.md §3.1.1 step 2; CHANGELOG 0.10.0 #125"
     },
     {
       "entry_point": "POST /v1/upload/sbom",
@@ -476,7 +476,7 @@
       "violation_symptom": "crash",
       "severity_tier": "correctness",
       "provenance": "documented",
-      "source": "DESIGN.md §5.3; CHANGELOG 0.9.0 #109, #110; CHANGELOG [Unreleased] untrusted input sanitization"
+      "source": "DESIGN.md §5.3; CHANGELOG 0.9.0 #109, #110; CHANGELOG 0.10.0 #125"
     },
     {
       "property": "P-METRIC-CARD",

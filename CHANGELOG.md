@@ -7,11 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-11-13
+
 ### Added
-* Eclipse GitLab workloads: tokens issued by `https://gitlab.eclipse.org` are
-  matched by `project_path` and `project_id`, with a `pipeline_source`
-  allowlist (`push`, `web`, `schedule`, `api`); `pia sync` accepts GitLab
-  project URLs
+* Eclipse GitLab workloads (#127)
+* Threat model by `alpha-omega-security/threat-model`(#121)
+
+### Changed
+* Harden input sanitization for payload and token claims (#125)
+
+### Fixed
+* 500 on input corner cases (#125)
+* Misc CI and dependency updates
 
 ## [0.9.0] - 2026-10-20
 

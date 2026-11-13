@@ -4,9 +4,8 @@
 
 - **Project**: PIA, the Eclipse Foundation's OIDC authentication broker for
   SBOM uploads to DependencyTrack. Repository `eclipse-csi/pia`.
-- **Version binding**: the first release after 0.9.0, modeled at commit
-  `d26ce3a` ("Add Eclipse GitLab workload support", CHANGELOG
-  `[Unreleased]`) on `3f011aa` ("Sanitize untrusted input at the trust
+- **Version binding**: 0.10.0, modeled at commit `901d3d5` ("Add gitlab
+  support", #127) on `3f011aa` ("Sanitize untrusted input at the trust
   boundary", #125). Those commits are the only changes to the service since
   0.9.0: they add Eclipse GitLab workloads (including `api` pipelines) and
   sanitize untrusted input. Reports against 0.9.0 are triaged against
@@ -355,12 +354,12 @@ streams it; the SBOM is a base64 string it does not decode *(documented, issue
 | Entry point | Input operand | Attacker-controllable? | Control kind | Caller must enforce | Provenance |
 | --- | --- | --- | --- | --- | --- |
 | `POST /v1/upload/sbom` | `Authorization` header (`Bearer <JWT>`) | yes, by anyone who can reach the proxy | data, serialized-state | none — `P-SIG` | *(documented, DESIGN.md §4.1 request headers)* |
-| `POST /v1/upload/sbom` | unverified JWT `iss` claim (selects the discovery URL) | yes | resource-name | must be a printable string before the database lookup, else 401 — `P-ERRORS`; `P-ISSUER-PIN` | *(documented, DESIGN.md §3.1.1 step 2)* *(documented, CHANGELOG `[Unreleased]` "untrusted input sanitization")* |
+| `POST /v1/upload/sbom` | unverified JWT `iss` claim (selects the discovery URL) | yes | resource-name | must be a printable string before the database lookup, else 401 — `P-ERRORS`; `P-ISSUER-PIN` | *(documented, DESIGN.md §3.1.1 step 2)* *(documented, CHANGELOG 0.10.0 "#125")* |
 | `POST /v1/upload/sbom` | JWT header `kid`, `alg` | yes | data, type-class | none — `P-SIG` (RS256 only, `kid` must match a `sig` key) | *(documented, DESIGN.md §3.1.1 step 4 "Verify signature using RSA256")* |
-| `POST /v1/upload/sbom` | verified claims `aud`, `exp`, `iat`, `repository`, `repository_owner_id`, `event_name` | conditional: only a registered issuer can sign them; the triggering actor chooses `event_name`, `ref` and similar within what the issuer allows | data | `repository` and `repository_owner_id` must be printable strings before the lookup — `P-SIG`, `P-WORKLOAD-BIND`, `P-ERRORS` | *(documented, DESIGN.md §3.1.1 steps 5–6)* *(documented, CHANGELOG `[Unreleased]` "untrusted input sanitization")* |
+| `POST /v1/upload/sbom` | verified claims `aud`, `exp`, `iat`, `repository`, `repository_owner_id`, `event_name` | conditional: only a registered issuer can sign them; the triggering actor chooses `event_name`, `ref` and similar within what the issuer allows | data | `repository` and `repository_owner_id` must be printable strings before the lookup — `P-SIG`, `P-WORKLOAD-BIND`, `P-ERRORS` | *(documented, DESIGN.md §3.1.1 steps 5–6)* *(documented, CHANGELOG 0.10.0 "#125")* |
 | `POST /v1/upload/sbom` | verified GitLab claims `project_path`, `project_id`, `pipeline_source` | conditional: only Eclipse GitLab can sign them, but any account holder there can mint a token for a project they own; in a merge request pipeline the project claims name the MR's *source* project (the fork); the triggering actor chooses `pipeline_source` and `ref` within what GitLab allows | data | `project_path` and `project_id` must be printable strings before the lookup — `P-SIG`, `P-WORKLOAD-BIND`, `P-ERRORS` | *(documented, `pia/models.py` `find_workload_by_claims` comment "NOT `job_project_*`")* *(documented, DESIGN.md §5.3 "must be printable strings")* *(maintainer, 2026-11)* |
-| `POST /v1/upload/sbom` | body `product_name` | yes (authenticated workload) | resource-name | strict non-empty printable string, else 422 — `P-ERRORS`; so a registered name matches only if it is printable (`register-printable-names`, §1.13); `P-WORKLOAD-BIND` resolves it only within the workload's EF project | *(documented, README authorization note)* *(documented, CHANGELOG `[Unreleased]` "untrusted input sanitization")* *(maintainer, 2026-11)* |
-| `POST /v1/upload/sbom` | body `product_version`, `is_latest` | yes (authenticated workload) | data | strict types (non-empty printable string, boolean), else 422 — `P-ERRORS`; DependencyTrack validates; PIA relays verbatim (`D-SBOM-VALIDATION`) | *(documented, DESIGN.md §3.1 step 6)* *(documented, CHANGELOG `[Unreleased]` "untrusted input sanitization")* |
+| `POST /v1/upload/sbom` | body `product_name` | yes (authenticated workload) | resource-name | strict non-empty printable string, else 422 — `P-ERRORS`; so a registered name matches only if it is printable (`register-printable-names`, §1.13); `P-WORKLOAD-BIND` resolves it only within the workload's EF project | *(documented, README authorization note)* *(documented, CHANGELOG 0.10.0 "#125")* *(maintainer, 2026-11)* |
+| `POST /v1/upload/sbom` | body `product_version`, `is_latest` | yes (authenticated workload) | data | strict types (non-empty printable string, boolean), else 422 — `P-ERRORS`; DependencyTrack validates; PIA relays verbatim (`D-SBOM-VALIDATION`) | *(documented, DESIGN.md §3.1 step 6)* *(documented, CHANGELOG 0.10.0 "#125")* |
 | `POST /v1/upload/sbom` | body `bom` (base64 CycloneDX) | yes (authenticated workload) | data, size | proxy caps the body size; DependencyTrack validates content (`D-SBOM-VALIDATION`) | *(documented, DESIGN.md §3.1 step 3 "so that we don't have to parse the SBOM")* |
 | `POST /v1/upload/sbom` | `Content-Type`, malformed or non-UTF-8 body | yes | data, type-class | none — `P-ERRORS` | *(documented, CHANGELOG 0.9.0 "#110")* |
 | `POST /v1/upload/sbom` | OIDC discovery document (`jwks_uri` and the rest) | conditional: only the allowlisted issuer's origin can answer | data, size, resource-name | none — `P-ISSUER-PIN`, `P-ISSUER-BOUND` | *(documented, DESIGN.md §3.1.1 step 3)* |
@@ -379,7 +378,7 @@ component):
 
 | Component | Dimension | Status | Conditions / boundary | Routes to | Provenance |
 | --- | --- | --- | --- | --- | --- |
-| `auth` | numeric domain | claimed | issuer responses ≤ 1 MiB decoded; `exp`/`iat` are checked as numbers by PyJWT; `iss` must be a printable string before the database lookup | §1.11 `P-ISSUER-BOUND`, `P-ERRORS` | *(documented, DESIGN.md §3.1.1 step 3; CHANGELOG 0.9.0 "#109")* *(documented, CHANGELOG `[Unreleased]` "untrusted input sanitization")* |
+| `auth` | numeric domain | claimed | issuer responses ≤ 1 MiB decoded; `exp`/`iat` are checked as numbers by PyJWT; `iss` must be a printable string before the database lookup | §1.11 `P-ISSUER-BOUND`, `P-ERRORS` | *(documented, DESIGN.md §3.1.1 step 3; CHANGELOG 0.9.0 "#109")* *(documented, CHANGELOG 0.10.0 "#125")* |
 | `auth` | failure atomicity | N/A — no state is mutated; every request is independent and the database is read-only for the app | — | §1.5 | *(documented, README "runtime database user only needs read access")* |
 | `auth` | recursive/cyclic topology | N/A — inputs are flat JSON documents (JWT payload, discovery, JWKS); nesting depth is the runtime JSON parser's contract | — | §1.9 | *(documented, DESIGN.md §5.1 PyJWT entry)* |
 | `auth` | callback/collaborator execution | claimed | the only collaborator whose output steers execution is the issuer; PIA follows its `jwks_uri` only under the issuer URL and follows no redirects | §1.11 `P-ISSUER-PIN` | *(documented, CHANGELOG 0.9.0 "#113")* |
@@ -626,7 +625,7 @@ Actors assume the §1.2 baseline deployment.
   not a vulnerability, since the worker survives, the exception stays within
   one request, the client sees a generic body, and no authentication decision
   can flip *(maintainer, 2026-10)*. *Voided by*: nothing. *(documented,
-  DESIGN.md §5.3; CHANGELOG 0.9.0 "#109", "#110")* *(documented, CHANGELOG `[Unreleased]` "untrusted input sanitization")*
+  DESIGN.md §5.3; CHANGELOG 0.9.0 "#109", "#110")* *(documented, CHANGELOG 0.10.0 "#125")*
 - **`P-METRIC-CARD` Bounded metric cardinality** (`ops-endpoints`): the method
   collapses to a fixed set (`pia/metrics.py:71`), the path is the route
   template or `<unmatched>`, `reason` and `outcome` are `Literal` types, and
