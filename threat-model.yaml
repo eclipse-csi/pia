@@ -1,7 +1,7 @@
 # threat-model.yaml — derived index; the prose threat model is canonical.
 schema: threat-model-sidecar/v2
 project: pia
-prose_version: "threat-model.md@sha256:5ab8cb4195f8d35e5ee30fe825d561d153bf9e4c6fabfe98366cc805522dd383"
+prose_version: "threat-model.md@sha256:59b92e860fbf1cc66a791c8467f536f19e19e087def3134da30ffed5384dd9bb"
 model_status: accepted
 triage_policy: strict
 confidence: {documented: 183, maintainer: 48, inferred: 0, assumption: 0}
@@ -69,7 +69,7 @@ entry_points:
         attacker_controllable: true
         control_kinds: [resource-name]
         caller_must_enforce: "none — must be a printable string before the database lookup, else 401 (P-ERRORS); P-ISSUER-PIN"
-        provenance: {kind: documented, source: "DESIGN.md §3.1.1 step 2; CHANGELOG [Unreleased] untrusted input sanitization"}
+        provenance: {kind: documented, source: "DESIGN.md §3.1.1 step 2; CHANGELOG 0.10.0 #125"}
       - name: JWT header kid and alg
         attacker_controllable: true
         control_kinds: [data, type-class]
@@ -586,7 +586,7 @@ properties_claimed:
   - {id: P-NO-STALL, kind: availability, components: [auth, upload-relay, ops-endpoints], tier: security-critical, conditions: "fewer than about 40 concurrent slow requests; DependencyTrack call has 5 s connect and 30 s read timeouts", violation_symptoms: [hang], provenance: {kind: documented, source: "CHANGELOG 0.9.0 #112; PR #112 description"}}
   - {id: P-LOG-ESCAPE, kind: output-sanitization, components: [auth, ops-endpoints], tier: security-critical, conditions: "values logged before the signature check passes (unverified iss, decode and verification errors) are escaped with !a; request ID server-generated; token and API key never logged", violation_symptoms: [x-log-forgery, info-leak], provenance: {kind: documented, source: "CHANGELOG 0.3.0 #60"}}
   - {id: P-LOG-ESCAPE-AUTHED, kind: output-sanitization, components: [auth, upload-relay], tier: correctness-only, conditions: "values logged after a token verified for a registered workload (claims summary, product_name, product_version, DependencyTrack body) are escaped with !a; the fixed line text names the caller's real ef_project_id", violation_symptoms: [x-log-forgery], provenance: {kind: maintainer, date: "2026-10"}}
-  - {id: P-ERRORS, kind: correctness, components: [auth, upload-relay], tier: correctness-only, conditions: "malformed POST data (wrong JSON type, empty or non-printable product_name/product_version) yields 422 without echoing the body; token problems, including a malformed iss or workload-matching claims that are not printable strings or a non-string event_name or pipeline_source, yield 401; DependencyTrack failure yields 502 or the relayed status; unprintable text (NUL, lone surrogates, other control characters) never reaches a database query, before or after authentication (maintainer 2026-11); an unhandled 500 on malformed unauthenticated input is a bug, not a vulnerability (maintainer ruling 2026-10)", violation_symptoms: [crash], provenance: {kind: documented, source: "DESIGN.md §5.3; CHANGELOG 0.9.0 #109, #110; CHANGELOG [Unreleased] untrusted input sanitization"}}
+  - {id: P-ERRORS, kind: correctness, components: [auth, upload-relay], tier: correctness-only, conditions: "malformed POST data (wrong JSON type, empty or non-printable product_name/product_version) yields 422 without echoing the body; token problems, including a malformed iss or workload-matching claims that are not printable strings or a non-string event_name or pipeline_source, yield 401; DependencyTrack failure yields 502 or the relayed status; unprintable text (NUL, lone surrogates, other control characters) never reaches a database query, before or after authentication (maintainer 2026-11); an unhandled 500 on malformed unauthenticated input is a bug, not a vulnerability (maintainer ruling 2026-10)", violation_symptoms: [crash], provenance: {kind: documented, source: "DESIGN.md §5.3; CHANGELOG 0.9.0 #109, #110; CHANGELOG 0.10.0 #125"}}
   - {id: P-METRIC-CARD, kind: resource-bound, components: [ops-endpoints], tier: security-critical, conditions: "method collapses to a fixed set, path is the route template or <unmatched>, reason/outcome are Literal, product_name labeled only after resolving to a database row", violation_symptoms: [unbounded-allocation], provenance: {kind: documented, source: "DESIGN.md §5.4 Label cardinality"}}
   - {id: P-OUTBOUND-TLS, kind: confidentiality, components: [auth, upload-relay, operator-tooling], tier: security-critical, conditions: "issuer URLs and the CLI's GitHub and GitLab API URLs are HTTPS by construction; requests verifies certificates by default; DependencyTrack URL is https (an http URL is dev-only, §1.6)", violation_symptoms: [info-leak], provenance: {kind: maintainer, date: "2026-11"}}
   - {id: P-SBOM-OPAQUE, kind: correctness, components: [upload-relay], tier: correctness-only, conditions: "bom relayed byte-identical and never decoded", violation_symptoms: [wrong-output], provenance: {kind: documented, source: "DESIGN.md §3.1 step 3"}}
