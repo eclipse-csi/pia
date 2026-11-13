@@ -1,5 +1,5 @@
-# Reference copy of the `.gitlab-ci.yml` in
-# https://gitlab.eclipse.org/eclipsefdn/security/gitlab-id-demo, which the
+# Reference copy of the `.gitlab-ci.yml` in the pia-test-workload GitLab project
+# (https://gitlab.eclipse.org/eclipsefdn/security/pia-test-workload), which the
 # GitLab e2e test (e2e/platforms/gitlab.py) runs via the Pipelines API.
 # Keep both in sync.
 #
@@ -10,6 +10,9 @@ spec:
   inputs:
     pia_url:
       default: ""
+    audience:
+      description: audience of the OIDC token, must match PIA's expected audience
+      default: pia.eclipse.org
     product_name:
       default: ""
     product_version:
@@ -24,7 +27,7 @@ pia-upload:
     - if: $CI_PIPELINE_SOURCE == "api"
   id_tokens:
     PIA_ID_TOKEN:
-      aud: pia.eclipse.org
+      aud: $[[ inputs.audience ]]
   variables:
     PIA_URL: $[[ inputs.pia_url ]]
     PIA_PRODUCT_NAME: $[[ inputs.product_name ]]

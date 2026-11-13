@@ -125,8 +125,8 @@ The tests in `e2e/` run real CI jobs that upload an SBOM to the local stack,
 which is exposed via an [ngrok](https://ngrok.com) tunnel. They then check
 that the SBOM arrived in the local DependencyTrack. Covered platforms:
 - **Eclipse GitLab**: `pia-upload` job of
-  [gitlab-id-demo](https://gitlab.eclipse.org/eclipsefdn/security/gitlab-id-demo)
-  (reference copy in `e2e/gitlab-id-demo.gitlab-ci.yml`), started via the
+  [pia-test-workload](https://gitlab.eclipse.org/eclipsefdn/security/pia-test-workload)
+  (reference copy in `e2e/pia-test-workload.gitlab-ci.yml`), started via the
   Pipelines API
 - **GitHub Actions**: `pia-upload` workflow of a `pia-test-workload` repo you
   own (reference copy in `e2e/pia-test-workload.pia-upload.yml`), started via
@@ -137,7 +137,7 @@ Requirements:
 - `NGROK_AUTHTOKEN`: authtoken of a (free) ngrok account
 - GitLab:
   - `PIA_E2E_GITLAB_TOKEN`: GitLab token that can create pipelines in
-    gitlab-id-demo and read their jobs and artifacts. That is either a project
+    pia-test-workload and read their jobs and artifacts. That is either a project
     access token with role Developer and scope `api`, or a fine-grained
     personal access token with the project permissions "Pipeline: Create",
     "Pipeline: Read", "Job: Read" and "Job Artifact: Read"

@@ -28,7 +28,7 @@ ARTIFACT_FILE = "pia-response.json"
 
 class GitHubActions:
     name = "github"
-    product = "pia-test-workload"
+    product = "pia-test-workload-github"
 
     def __init__(
         self, token: str, repo: str, timeout: float = 600, interval: float = 10
@@ -63,15 +63,7 @@ class GitHubActions:
         self._request(
             "POST",
             f"/actions/workflows/{WORKFLOW}/dispatches",
-            json={
-                "ref": REF,
-                "inputs": {
-                    "pia_url": req.pia_url,
-                    "product_name": req.product_name,
-                    "product_version": req.product_version,
-                    "bom": req.bom_b64,
-                },
-            },
+            json={"ref": REF, "inputs": req.inputs()},
         )
 
         deadline = time.monotonic() + self.timeout

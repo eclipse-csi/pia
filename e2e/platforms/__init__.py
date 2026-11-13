@@ -17,6 +17,19 @@ class UploadRequest:
     product_name: str
     product_version: str
     bom_b64: str
+    audience: str | None = None  # OIDC token audience, if not the job's default
+
+    def inputs(self) -> dict[str, str]:
+        """Inputs for the CI run, as defined by the reference CI configs."""
+        inputs = {
+            "pia_url": self.pia_url,
+            "product_name": self.product_name,
+            "product_version": self.product_version,
+            "bom": self.bom_b64,
+        }
+        if self.audience:
+            inputs["audience"] = self.audience
+        return inputs
 
 
 @dataclass(frozen=True)

@@ -15,6 +15,11 @@ on:
       pia_url:
         required: true
         type: string
+      audience:
+        description: audience of the OIDC token, must match PIA's expected audience
+        required: false
+        default: pia.eclipse.org
+        type: string
       product_name:
         required: true
         type: string
@@ -37,16 +42,18 @@ jobs:
       - name: Upload SBOM to PIA
         env:
           PIA_URL: ${{ inputs.pia_url }}
+          PIA_AUDIENCE: ${{ inputs.audience }}
           PIA_PRODUCT_NAME: ${{ inputs.product_name }}
           PIA_PRODUCT_VERSION: ${{ inputs.product_version }}
           PIA_BOM: ${{ inputs.bom }}
         run: |
           python3 - <<'EOF'
-          import json, os, urllib.error, urllib.request
+          import json, os, urllib.error, urllib.parse, urllib.request
 
           # Request an OIDC token with PIA's audience from the Actions runtime
+          audience = urllib.parse.quote(os.environ["PIA_AUDIENCE"], safe="")
           token_req = urllib.request.Request(
-              os.environ["ACTIONS_ID_TOKEN_REQUEST_URL"] + "&audience=pia.eclipse.org",
+              os.environ["ACTIONS_ID_TOKEN_REQUEST_URL"] + "&audience=" + audience,
               headers={
                   "Authorization": "Bearer " + os.environ["ACTIONS_ID_TOKEN_REQUEST_TOKEN"]
               },

@@ -1,4 +1,4 @@
-"""Eclipse GitLab: runs the `pia-upload` job of the gitlab-id-demo project.
+"""Eclipse GitLab: runs the `pia-upload` job of a pia-test-workload project.
 
 The pipeline is created via the Pipelines API (`pipeline_source` "api") with
 the upload parameters passed as pipeline inputs. The job posts the SBOM to PIA
@@ -9,6 +9,7 @@ back here.
 import json
 import time
 from typing import Any
+from urllib.parse import quote
 
 import pytest
 import requests
@@ -16,7 +17,7 @@ import requests
 from . import UploadRequest, UploadResult
 
 GITLAB_URL = "https://gitlab.eclipse.org"
-PROJECT_ID = "16770"  # eclipsefdn/security/gitlab-id-demo
+PROJECT_PATH = "eclipsefdn/security/pia-test-workload"
 REF = "main"
 JOB_NAME = "pia-upload"
 ARTIFACT = "pia-response.json"
@@ -25,11 +26,17 @@ FINISHED = {"success", "failed", "canceled", "skipped"}
 
 class EclipseGitLab:
     name = "gitlab"
-    workload_url = f"{GITLAB_URL}/eclipsefdn/security/gitlab-id-demo"
-    product = "gitlab-id-demo"
+    product = "pia-test-workload-gitlab"
 
-    def __init__(self, token: str, timeout: float = 600, interval: float = 10):
-        self.api = f"{GITLAB_URL}/api/v4/projects/{PROJECT_ID}"
+    def __init__(
+        self,
+        token: str,
+        project_path: str = PROJECT_PATH,
+        timeout: float = 600,
+        interval: float = 10,
+    ):
+        self.workload_url = f"{GITLAB_URL}/{project_path}"
+        self.api = f"{GITLAB_URL}/api/v4/projects/{quote(project_path, safe='')}"
         self.headers = {"PRIVATE-TOKEN": token}
         self.timeout = timeout
         self.interval = interval
@@ -46,15 +53,7 @@ class EclipseGitLab:
         pipeline = self._request(
             "POST",
             "/pipeline",
-            json={
-                "ref": REF,
-                "inputs": {
-                    "pia_url": req.pia_url,
-                    "product_name": req.product_name,
-                    "product_version": req.product_version,
-                    "bom": req.bom_b64,
-                },
-            },
+            json={"ref": REF, "inputs": req.inputs()},
         ).json()
         run_url = pipeline["web_url"]
 
