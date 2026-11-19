@@ -20,6 +20,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 * 500 on input corner cases (#125)
 * Misc CI and dependency updates
 
+> [!NOTE]
+> The `v0.10.0` tag was accidentally pushed to an unmerged branch and includes
+> two work-in-progress commits that add end-to-end tests (8053878, e7a60e3).
+> They only touch `e2e/`, docs and dev tooling, and do not change the
+> released Docker image.
+
 ## [0.9.0] - 2026-10-20
 
 ### Added
