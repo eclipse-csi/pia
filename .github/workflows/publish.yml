@@ -29,6 +29,23 @@ jobs:
       uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       with:
         persist-credentials: false
+        # Full history incl. origin/main, for the release tag check below.
+        # Size difference to a shallow fetch is negligible (~770 vs ~210 KiB
+        # packed, as of Nov 2026).
+        fetch-depth: 0
+
+    - name: Verify release tag is on main
+      if: startsWith(github.ref, 'refs/tags/')
+      env:
+        TAG: ${{ github.ref_name }}
+      run: |
+        # Refuse to publish a release from a commit that isn't (yet) part of
+        # main.
+        if ! git merge-base --is-ancestor HEAD origin/main; then
+          echo "::error::${TAG} points to $(git rev-parse HEAD), which is not on main. Merge first, then re-tag."
+          echo "To delete the tag, temporarily disable the pia tag protection in eclipse-csi/.eclipsefdn."
+          exit 1
+        fi
 
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
