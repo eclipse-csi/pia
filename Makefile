@@ -32,6 +32,10 @@ test: ## Run tests with pytest
 test-verbose: ## Run tests with verbose output
 	uv run pytest -v
 
+.PHONY: test-e2e
+test-e2e: ## Run e2e tests against the local stack (see README)
+	uv run pytest e2e -v -rs
+
 .PHONY: test-coverage
 test-coverage: ## Run tests with coverage report
 	uv run pytest --cov=pia --cov-report=html
@@ -39,7 +43,7 @@ test-coverage: ## Run tests with coverage report
 .PHONY: lint
 lint: ## Check code quality with ruff
 	uv run ruff check && uv run ruff format --check
-	uv run mypy pia tests
+	uv run mypy pia tests e2e
 
 .PHONY: lint-fix
 lint-fix: ## Auto-fix linting issues and format code

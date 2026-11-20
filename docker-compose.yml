@@ -62,6 +62,20 @@ services:
     volumes:
       - dtrack-data:/data
 
+  # Public HTTPS tunnel to pia, so that real CI services (e.g. Eclipse GitLab)
+  # can reach the local stack. Only started with `--profile e2e` and requires
+  # NGROK_AUTHTOKEN. The public URL is read from the agent API on port 4040.
+  # See e2e/ for the end-to-end tests that use it.
+  ngrok:
+    image: ngrok/ngrok:3
+    container_name: pia-ngrok
+    profiles: [e2e]
+    command: ["http", "pia:8000"]
+    ports:
+      - "4040:4040"
+    environment:
+      - NGROK_AUTHTOKEN=${NGROK_AUTHTOKEN:-}
+
 volumes:
   pia-postgres-data:
   dtrack-data:
