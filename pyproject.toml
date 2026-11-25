@@ -30,7 +30,7 @@ pia = "pia.cli:cli"
 [dependency-groups]
 dev = [
     "pytest>=9.2.0",
-    "ruff>=0.17.4",
+    "ruff>=0.17.5",
     "httpx>=0.28.0",
     "pytest-cov>=7.1.0",
     "mypy>=2.4.1",
